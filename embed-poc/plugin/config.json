@@ -1,0 +1,39 @@
+{
+  "name": "PoC 配置探针",
+  "nameLocale": {
+    "zh": "PoC 配置探针",
+    "en": "PoC Options Probe"
+  },
+  "guid": "asc.{5C1A9E42-7B08-4D3F-A6C2-1E9048B7D530}",
+  "baseUrl": "",
+  "variations": [
+    {
+      "description": "把编辑器下发的 options 显示出来——那是宿主给插件递凭证的唯一通道",
+      "url": "index.html",
+      "icons": [
+        "resources/icon.png",
+        "resources/icon@2x.png"
+      ],
+      "isViewer": false,
+      "EditorsSupport": [
+        "word"
+      ],
+      "isVisual": true,
+      "isModal": false,
+      "//isInsideMode": [
+        "true = 停靠在编辑器左边那条面板里；false = 开成一个居中的弹窗。",
+        "**这一格决定的只是长相，不是通道**——两种形态下 options 都照样送到。",
+        "选 true 有两个理由：一是与仓库里另一个插件（demo/plugin）一致，",
+        "二是**弹窗会盖住正文**，而那会让按坐标点鼠标的自动实测把字敲到面板上",
+        "——那次的样子很有欺骗性：存件成功、版本往前走、字节也真的变了，",
+        "只有「新版里有这次敲的记号」一条红。"
+      ],
+      "isInsideMode": true,
+      "initDataType": "none",
+      "initData": "",
+      "isUpdateOleOnResize": false,
+      "buttons": [],
+      "events": []
+    }
+  ]
+}

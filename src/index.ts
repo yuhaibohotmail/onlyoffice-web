@@ -1,0 +1,37 @@
+/**
+ * onlyoffice-comp 公共 API
+ *
+ * | 层        | 目录      | 职责                              |
+ * |-----------|-----------|-----------------------------------|
+ * | const     | const/    | 常量、静态资源、文件类型映射      |
+ * | store     | store/    | 文档/语言等跨页面状态             |
+ * | util      | util/     | SDK 初始化、x2t 转换、下载工具    |
+ * | core      | core/     | EditorManager、事件总线、业务门面 |
+ * | feature   | feature/  | 批注、修订                        |
+ * | internal  | internal/ | mock server / socket（不对外）    |
+ */
+
+export * from "./const";
+export * from "./store";
+export * from "./util";
+export * from "./core";
+export * from "./feature";
+// 【本项目新增】界面上的法律声明入口。组件挂载时自动挂上，
+// 这里导出是为了让引用方能自定义位置或读到修改清单。
+export * from "./legal/notice";
+export { EditorLogger } from "./internal/editor/logger";
+export type {
+  EditorLogCategory,
+  EditorLogEntry,
+  EditorLogLevel,
+} from "./internal/editor/logger";
+
+export type * from "./type/word-api";
+export type * from "./type/sdk-internal";
+export type {
+  OfficeTheme,
+  OnlyOfficeConnector,
+  OnlyOfficeConnectorOptions,
+  User,
+} from "./internal/editor/types";
+export type { OfficeThemeId } from "./const";

@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>纯前端 OnlyOffice · 带后端 PoC</title>
+    <style>
+      /* ── 配色。就一套浅色，跟编辑器自己的 theme-white 对齐 ───────────────── */
+      :root {
+        --bg: #f4f5f7;
+        --panel: #ffffff;
+        --line: #e3e6ea;
+        --line-strong: #d0d7de;
+        --ink: #1f2328;
+        --ink-2: #57606a;
+        --ink-3: #8b949e;
+        --accent: #2f6feb;
+        --accent-hover: #1f5ad6;
+        --ok: #1a7f37;
+        --busy: #9a6700;
+        --err: #cf222e;
+        --chip: #f2f4f7;
+      }
+
+      * { box-sizing: border-box; }
+      html, body, #root { height: 100%; margin: 0; }
+      body {
+        font: 14px/1.6 system-ui, "Microsoft YaHei", sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+
+      /*
+       * ⚠ **整页走 flex，别再用 calc(100% - 64px)。**
+       * 原本编辑器容器的高度是「100% 减去顶栏那 64px」——一个写死的数。
+       * 顶栏一改高度，这个数就对不上了，而**对不上不报错**：
+       * 编辑器要么被挤出视口下方，要么下面空一条，看着像编辑器自己没铺满。
+       * 改成 flex 之后顶栏多高都行，容器自己占满剩下的。
+       */
+      #root { display: flex; flex-direction: column; }
+
+      /* ── 顶上那一条：这是什么、连着哪两个端口 ─────────────────────────── */
+      .app-head {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 36px;
+        padding: 0 14px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+      }
+      .app-head .name { font-weight: 600; letter-spacing: .2px; }
+      .app-head .name em { font-style: normal; color: var(--accent); }
+      .app-head .sub { color: var(--ink-3); font-size: 12px; }
+      .app-head .spacer { margin-left: auto; }
+      .port {
+        font: 11px/1 ui-monospace, Consolas, monospace;
+        color: var(--ink-2);
+        background: var(--chip);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 4px 8px;
+      }
+
+      /* ── 控制条 ─────────────────────────────────────────────────────── */
+      #bar {
+        flex: none;
+        padding: 10px 14px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--line);
+        box-shadow: 0 1px 3px rgba(16, 22, 26, .05);
+      }
+      .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+      .row + .row { margin-top: 9px; }
+      .field { display: inline-flex; align-items: center; gap: 6px; }
+      .field > label {
+        font-size: 12px;
+        color: var(--ink-2);
+        white-space: nowrap;
+      }
+      .sep {
+        width: 1px;
+        height: 22px;
+        background: var(--line);
+        margin: 0 2px;
+      }
+
+      select {
+        font: inherit;
+        font-size: 13px;
+        color: var(--ink);
+        background: var(--panel);
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        padding: 5px 8px;
+        max-width: 34em;
+        cursor: pointer;
+      }
+      select:hover { border-color: var(--ink-3); }
+      select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+      button {
+        font: inherit;
+        font-size: 13px;
+        color: var(--ink);
+        background: var(--panel);
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        padding: 5px 12px;
+        cursor: pointer;
+        transition: background .12s, border-color .12s;
+      }
+      button:hover { background: #f6f8fa; border-color: var(--ink-3); }
+      button:active { background: #eef1f4; }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      button.primary {
+        color: #fff;
+        background: var(--accent);
+        border-color: transparent;
+        font-weight: 500;
+      }
+      button.primary:hover { background: var(--accent-hover); }
+      /* 探针那一档：平时不该显眼，它是用来做对照的，不是日常按的 */
+      button.ghost { color: var(--ink-2); border-style: dashed; }
+
+      /* ── 状态行 ─────────────────────────────────────────────────────── */
+      .statusline {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin-top: 9px;
+        padding-top: 8px;
+        border-top: 1px dashed var(--line);
+      }
+      .dot {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        margin-top: 5px;
+        border-radius: 50%;
+        background: var(--ink-3);
+      }
+      #status {
+        font: 12px/1.5 ui-monospace, Consolas, monospace;
+        color: var(--ink-2);
+        /* 报错可能很长。**不截断**——截了就得去别处找原因；给它一个能滚的高度上限，
+           这样版面不会随消息长短跳来跳去。 */
+        max-height: 3.2em;
+        overflow: auto;
+        overflow-wrap: anywhere;
+      }
+      .s-busy .dot { background: var(--busy); animation: blink 1s ease-in-out infinite; }
+      .s-ok   .dot { background: var(--ok); }
+      .s-err  .dot { background: var(--err); }
+      .s-err  #status { color: var(--err); }
+      @keyframes blink { 50% { opacity: .25; } }
+      @media (prefers-reduced-motion: reduce) {
+        .s-busy .dot { animation: none; }
+      }
+
+      .chips { margin-left: auto; display: flex; flex: none; gap: 6px; }
+      .chip {
+        font: 11px/1 ui-monospace, Consolas, monospace;
+        color: var(--ink-2);
+        background: var(--chip);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 4px 8px;
+        white-space: nowrap;
+      }
+
+      /*
+       * 编辑器与那句空状态提示并排住在这一层里。
+       * ⚠ **提示必须是 .onlyoffice-container 的兄弟，不能是它的孩子**，理由见 App.tsx 里那段。
+       */
+      .stage { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
+
+      .empty-hint {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: var(--bg);
+      }
+      .empty-card { max-width: 560px; }
+      .empty-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+      .empty-p { margin: 0 0 16px; color: var(--ink-2); }
+      .legend {
+        margin: 0;
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 6px 14px;
+        font-size: 13px;
+      }
+      .legend dt { color: var(--ink); font-weight: 600; white-space: nowrap; }
+      .legend dd { margin: 0; color: var(--ink-2); }
+      .legend code {
+        font: 12px/1 ui-monospace, Consolas, monospace;
+        background: var(--chip);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 2px 5px;
+      }
+
+      /*
+       * ⚠ **这个容器有三条不能改的**：
+       *   ① 类名叫 .onlyoffice-container —— 组件与全部自动实测都按它找编辑器；
+       *   ② 编辑器 iframe 是它的**直接子节点**，里面不许再套包装元素；
+       *   ③ position 必须是定位过的 —— 法律声明入口是绝对定位挂在它上面的，
+       *      容器要是 static，那个入口会跑到页面别处去，就不「显著可见」了。
+       * min-height: 0 也不能省：flex 子项默认不肯缩到内容以下，省了编辑器会溢出视口。
+       */
+      .onlyoffice-container {
+        position: relative;
+        flex: 1 1 auto;
+        min-height: 0;
+        background: var(--panel);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>接入页</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body { display: flex; flex-direction: column; font: 14px/1.6 system-ui, sans-serif; }
+      #状态 { padding: 6px 12px; border-bottom: 1px solid #ddd; background: #fafafa;
+              font-family: ui-monospace, monospace; font-size: 12px; }
+      .stage { flex: 1; min-height: 0; display: flex; }
+      /* ⚠ 三样不能碰：类名、编辑器 iframe 必须是它的直接子节点、它必须是定位过的
+         （法律声明入口绝对定位挂在它上面，容器是 static 的话入口会跑到页面别处去，
+         就不「显著可见」了——那是许可的硬要求）。min-height:0 不能省。 */
+      .onlyoffice-container { flex: 1; min-height: 0; position: relative; }
+    </style>
+  </head>
+  <body>
+    <div id="状态">等宿主把配置递进来…</div>
+    <div class="stage">
+      <div class="onlyoffice-container">
+        <div id="iframe-office-id" style="position:absolute; inset:0"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/embed.ts"></script>
+  </body>
+</html>

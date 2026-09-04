@@ -1,0 +1,31 @@
+{
+  "name": "公式实验室",
+  "nameLocale": {
+    "zh": "公式实验室",
+    "en": "Formula Lab"
+  },
+  "guid": "asc.{9B1D4E77-3A52-4C08-B6E1-0F5A2D8C7431}",
+  "baseUrl": "",
+  "variations": [
+    {
+      "description": "在纯前端 OnlyOffice 里验插件：插公式、往文档里放带按钮的一块、读编辑器下发的配置",
+      "url": "index.html",
+      "icons": [
+        "resources/icon.png",
+        "resources/icon@2x.png"
+      ],
+      "isViewer": false,
+      "EditorsSupport": [
+        "word"
+      ],
+      "isVisual": true,
+      "isModal": false,
+      "isInsideMode": true,
+      "initDataType": "none",
+      "initData": "",
+      "isUpdateOleOnResize": false,
+      "buttons": [],
+      "events": []
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>公式实验室</title>
+  <!--
+    插件的引导脚本。**它不是我们写的**，是 Ascensio 官方那份（Apache-2.0），
+    见 third-party/README.md。每个 OnlyOffice 插件都要它：编辑器发来的 plugin_init
+    消息里带着一段代码，这个脚本 eval 之后才有 Asc.plugin.executeMethod 可用。
+    换句话说，**插件的 API 是编辑器在运行时注入的**，不在这个包里，也不在 SDK 里。
+  -->
+  <script type="text/javascript" src="./third-party/plugins.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body { font: 13px/1.6 system-ui, "Microsoft YaHei", sans-serif; color: #222; padding: 10px; box-sizing: border-box; }
+    h4 { margin: 0 0 6px; font-size: 13px; }
+    button { display: block; width: 100%; margin-bottom: 6px; padding: 6px 8px; cursor: pointer; text-align: left; }
+    #status { margin-top: 8px; padding: 6px; background: #f5f5f5; border-radius: 3px;
+              font-family: Consolas, monospace; font-size: 11px; word-break: break-all; min-height: 2.5em; }
+    #status.err { background: #fdeaea; color: #a00; }
+    #options { margin-top: 8px; font-family: Consolas, monospace; font-size: 11px;
+               background: #eef5ff; padding: 6px; border-radius: 3px; word-break: break-all; }
+    .hint { color: #777; font-size: 11px; margin: 8px 0 4px; }
+  </style>
+</head>
+<body>
+  <h4>公式实验室</h4>
+
+  <p class="hint">① 公式：MathML 经 PasteHtml 进文档</p>
+  <button id="btn-formula">插入求根公式</button>
+  <button id="btn-nary">插入定积分（带 n 元运算符那个坑）</button>
+
+  <p class="hint">② 文档内按钮：内容控件 + 挂在它上面的按钮</p>
+  <button id="btn-question">插入一道带「判分」按钮的题</button>
+
+  <p class="hint">③ 配置下发通道：编辑器给插件的那格 options</p>
+  <button id="btn-options">把收到的配置写进文档</button>
+
+  <div id="options">options：（还没读到）</div>
+  <div id="status">等编辑器初始化…</div>
+
+  <script type="text/javascript" src="./plugin.js"></script>
+</body>
+</html>

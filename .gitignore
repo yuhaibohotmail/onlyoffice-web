@@ -1,0 +1,43 @@
+# 抽出来的 OnlyOffice 静态资源与 x2t 产物。**不进 git**：
+# 约 2 GB，且随镜像可复现——`node scripts/extract-assets.mjs` 现抽一份。
+# 抽取脚本会在里面留一份 SOURCE.json 记下镜像 ID，那才是「这堆东西是从哪来的」的答案。
+/vendor/
+
+node_modules/
+dist/
+.vite/
+
+# tsc -b 的增量缓存。**每跑一次 typecheck 就会重新长出来**，
+# 所以光删没用，要在这儿挡住——不挡的话它是个未跟踪文件，一次宽路径 git add 就进去了。
+tsconfig.tsbuildinfo
+
+# 运行期数据：落盘的文档版本
+/demo/storage/
+
+# 自动实测的产物
+/out/
+/test-results/
+
+*.log
+.DS_Store
+
+# 各种格式的测试文档：由 scripts/make-format-fixtures.mjs 现生成，**不进 git**。
+# 里面有三份取自 ONLYOFFICE core 的老式二进制文档（doc/xls/ppt）——
+# 那三种 OnlyOffice 只读不写，生成不出来，只能取真文件。它们不该躺在我们仓库里。
+/demo/fixtures/formats/
+
+# 装配出来的发布包（含 vendor，约 1.5 GB）。可再生，不进 git。
+/release/
+
+# ─────────────────────────────────────────────────────────────────────────
+# 内部工作笔记：**留在本地，不进这个公开仓库**（2026-09-04 裁定）
+#
+# 判据是「它是不是许可要求的『对应源码』」——这三份都不是，
+# 它们是我们自己的工作记录，对拿到这个仓库的人只是噪音，
+# 而且里面写着我们的内网地址与本机路径。
+#
+# ⚠ **不是「以后再说」，是想过之后决定不发**。要发的那两份
+# （FINDINGS.md 与 BACKEND.md）已经清过内网地址、照发。
+/NEXT-SESSION-PROMPT.md
+/RESTRUCTURE-PLAN.md
+/report.html

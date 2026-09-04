@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>笨静态服务器后面，这套东西还正常吗</title>
+    <style>
+      /* 整页 flex。**别用 height: calc(100% - 顶栏高度)** —— 写死的那个数在顶栏改高度
+         之后就对不上了，而对不上不报错：编辑器要么被挤出视口下方、要么下面空一条。 */
+      html, body { height: 100%; margin: 0; }
+      body { display: flex; flex-direction: column; font: 14px/1.6 system-ui, sans-serif; }
+      header { padding: 10px 14px; border-bottom: 1px solid #ddd; background: #fafafa; }
+      h1 { font-size: 15px; margin: 0 0 6px; }
+      #结论 { font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
+      .stage { flex: 1; min-height: 0; display: flex; }
+      /* ⚠ `.onlyoffice-container` 有三样不能碰：类名（组件与全部自动实测都按它找编辑器）、
+         编辑器 iframe 必须是它的**直接子节点**、它必须是**定位过的**（法律声明入口是
+         绝对定位挂在它上面的，容器要是 static，那个入口会跑到页面别处去，
+         就不「显著可见」了 —— 而那是许可的硬要求）。
+         `min-height: 0` 也不能省 —— flex 子项默认不肯缩到内容以下。 */
+      .onlyoffice-container { flex: 1; min-height: 0; position: relative; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>笨静态服务器后面，这套东西还正常吗</h1>
+      <div id="结论">正在跑…</div>
+    </header>
+    <div class="stage">
+      <div class="onlyoffice-container">
+        <!-- ⚠ 这个内层 div 会被组件**换掉**，编辑器 iframe 直接插进外层那个容器里。
+             所以「按 id 找编辑器」永远找不到——那是个不报错的空等。 -->
+        <div id="iframe-office-id" style="position:absolute; inset:0"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/static-check.ts"></script>
+  </body>
+</html>

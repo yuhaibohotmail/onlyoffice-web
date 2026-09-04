@@ -1,0 +1,45 @@
+{
+  "name": "onlyoffice-web",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "description": "我们自己维护的浏览器版 OnlyOffice 前端组件，从社区版构建。基于 Ascensio System SIA 开发的 ONLYOFFICE，已修改。",
+  "scripts": {
+    "assets": "node scripts/extract-assets.mjs",
+    "x2t": "node scripts/fetch-x2t.mjs",
+    "fonts": "node scripts/build-x2t-fonts.mjs",
+    "check:fonts": "node scripts/check-x2t-fonts.mjs",
+    "dev": "vite demo --port 3040 --strictPort",
+    "server": "node demo/server/index.mjs",
+    "build": "tsc -b && vite build demo",
+    "typecheck": "tsc -b --pretty false",
+    "fixtures": "node demo/fixtures/make-fixtures.mjs",
+    "e2e": "node demo/e2e/run.mjs",
+    "check:legal": "node scripts/check-legal.mjs",
+    "check:404": "node scripts/check-no-404.mjs",
+    "fixtures:formats": "node scripts/make-format-fixtures.mjs",
+    "check:formats": "node scripts/check-formats.mjs",
+    "check:rule": "node scripts/check-copied-rule.mjs",
+    "measure:payload": "node scripts/measure-payload.mjs",
+    "release": "node scripts/make-release.mjs",
+    "poc:build": "vite build embed-poc",
+    "poc:plugins": "node embed-poc/server/pregenerate-plugins.mjs",
+    "poc:static": "node embed-poc/server/static-server.mjs",
+    "poc:mock": "node embed-poc/server/mock-host.mjs",
+    "poc:e2e": "node embed-poc/probe/run.mjs"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "playwright": "^1.61.1",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  }
+}

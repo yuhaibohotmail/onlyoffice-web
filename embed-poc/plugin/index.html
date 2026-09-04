@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PoC 配置探针</title>
+  <!--
+    插件引导脚本。**不是我们写的**，是 Ascensio 官方那份（Apache-2.0），
+    这里直接引静态资源里自带的那一份（`sdkjs-plugins/v1/plugins.js`），
+    **不往这个 PoC 里拷第三方代码**——自足那条约束说的是「不依赖仓库里的既有代码」，
+    而静态资源本来就是这个 PoC 允许消费的两样之一。
+
+    每个 OnlyOffice 插件都要它：编辑器发来的 plugin_init 消息里带着一段代码，
+    这个脚本 eval 之后才有 Asc.plugin 那些 API 可用——
+    **插件的 API 是编辑器在运行时注入的**，不在这个包里，也不在 SDK 里。
+
+    ⚠ 这里引的是一个**稳定别名** `/plugins-bootstrap.js`，由静态服务器挂到
+    `<静态根>/sdkjs-plugins/v1/plugins.js` 上。不这么做的话这份 HTML 里就得写死
+    静态资源的版本号，而那个号只有盘上一处真相——写死等于造第二份，
+    而两份对不上的样子是「插件一片空白」，不报错。nginx 那边也是一条 location 的事。
+  -->
+  <script type="text/javascript" src="/plugins-bootstrap.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body { font: 13px/1.6 system-ui, "Microsoft YaHei", sans-serif; color: #222;
+           padding: 10px; box-sizing: border-box; }
+    h4 { margin: 0 0 4px; font-size: 13px; }
+    .hint { color: #777; font-size: 11px; margin: 0 0 8px; }
+    #收到的 { font-family: Consolas, monospace; font-size: 11px; background: #eef5ff;
+              padding: 8px; border-radius: 3px; word-break: break-all; white-space: pre-wrap; }
+    #状态 { margin-top: 8px; padding: 6px; background: #f5f5f5; border-radius: 3px;
+            font-family: Consolas, monospace; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h4>PoC 配置探针</h4>
+  <p class="hint">
+    它只干一件事：把**编辑器下发给它的那格 options** 显示出来。
+    那是宿主给插件递凭证的唯一通道——静态登记表那条路没有这一格。
+  </p>
+  <div id="收到的">options：（还没读到）</div>
+  <div id="状态">等编辑器初始化…</div>
+  <script type="text/javascript" src="plugin.js"></script>
+</body>
+</html>

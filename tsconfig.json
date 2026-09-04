@@ -1,0 +1,32 @@
+{
+  "//": [
+    "src/ 整棵是拷进来的第三方组件（AGPL-3.0），12 600 行——它是这个项目唯一要发布的那一份。",
+    "上游自己就是用 strict:false 编它的，而且那样也还剩一批错（Next.js 构建放过类型错误）。",
+    "在这里对它开 strict 只会得到一屏我们既不该改、也改不动的噪声，",
+    "所以这份配置跟上游对齐；我们自己写的 demo/ 那几个文件是按严格标准写的。"
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowJs": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src",
+    "demo",
+    "embed-poc",
+    "types"
+  ]
+}
