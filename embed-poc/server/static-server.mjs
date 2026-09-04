@@ -113,6 +113,33 @@ const 挂载 = [
   ],
   /** 这个 PoC 自己那个插件。**与编辑器同源**，省掉一层跨源的麻烦。 */
   ["/plugin", path.join(HERE, "..", "plugin")],
+  /**
+   * 三份许可原件。**这不是可选的，是许可要求的东西。**
+   *
+   * 界面上那个法律声明入口里有四条链接，其中三条指到这里。
+   * 附加条款第三条要的是「用户拿得到许可信息」，而**入口点开之后 404
+   * 与没有入口是一回事**。
+   *
+   * ⚠ **这三条挂载是搭这个 PoC 时才发现要有的**：原来这个笨服务器只发
+   * 静态资源与页面，`/legal/*` 一条都不发——也就是说纯静态那一档下
+   * 那三条链接全是 404，**而页面照样打得开、一句错都不报**。
+   *
+   * ⚠ **装机那一批要照做**：前两份就在静态资源树里（nginx 一条 alias 就行），
+   * 第三份 `NOTICE.md` 在仓库根，**要单独拷进部署目录**。
+   * 第四条「获取源代码」不在这里——纯静态下它指向公开仓库，
+   * 由 `registerLegalNotice({sourceUrl})` 给。
+   */
+  [
+    "/legal/LICENSE.txt",
+    path.join(PROJECT_ROOT, "vendor", "onlyoffice", 版本, "LICENSE.txt"),
+    "文件",
+  ],
+  [
+    "/legal/3rd-Party.txt",
+    path.join(PROJECT_ROOT, "vendor", "onlyoffice", 版本, "3rd-Party.txt"),
+    "文件",
+  ],
+  ["/legal/NOTICE.md", path.join(PROJECT_ROOT, "NOTICE.md"), "文件"],
   [根前缀 + "/x2t-fonts", path.join(PROJECT_ROOT, "vendor", "x2t-fonts")],
   [根前缀 + "/x2t", path.join(PROJECT_ROOT, "vendor", "x2t")],
   [根前缀, path.join(PROJECT_ROOT, "vendor", "onlyoffice", 版本)],

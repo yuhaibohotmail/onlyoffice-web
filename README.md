@@ -89,7 +89,7 @@ npm run release -- --no-vendor    # 目标机上已经有 vendor 时
 | 环境变量 | 干什么 | 不设会怎样 |
 |---|---|---|
 | `OOW_TOKEN_SECRET` | 签票的密钥，至少 16 位 | **每次启动现生成一把随机的**，重启后旧票全失效（本机开发正好，真实部署要设） |
-| `OOW_SOURCE_URL` | 源码仓库地址 | 界面上「获取源代码」改成由本服务现打一个包给人下 |
+| `OOW_SOURCE_URL` | 源码仓库地址（本项目是 <https://github.com/yuhaibohotmail/onlyoffice-web>） | 界面上「获取源代码」改成由本服务现打一个包给人下 |
 
 前端那一半要有一个 web 服务器伺服 `dist/`，并把 `/api`、`/packages`、`/plugins`、`/legal`
 四条转到后端。⚠ **必须同源**——编辑器在 iframe 里、插件又在编辑器里再开一个 iframe，

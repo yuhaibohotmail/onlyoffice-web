@@ -68,7 +68,45 @@ export type LegalNoticeOptions = {
   legalRoot?: string;
   /** 我们自己这个修改版叫什么。 */
   productName?: string;
+  /**
+   * 「获取源代码」指到哪儿。**不给就指 `<legalRoot>/source`**（由后端现打一个包）。
+   *
+   * ⚠ **纯静态部署必须给这一格。** 那种部署下没有进程去现打包，
+   * `<legalRoot>/source` 会 404 —— 而许可证第 13 条要的是
+   * 「凡通过网络与本程序交互的用户都能免费取得**本版本**的完整对应源码」，
+   * **入口点开之后 404 与没有入口是一回事**。
+   *
+   * ⚠ 指过去的那个地址必须能取到**正在跑的这一版**。
+   * 仓库里是个更新的版本不算数——所以发布时要打一个与部署版本对得上的标签，
+   * 这一格指向那个标签。
+   */
+  sourceUrl?: string;
 };
+
+/**
+ * 模块级的那一份配置。
+ *
+ * ⚠ **为什么要它**：`mountLegalNotice` 是编辑器内部（`editor-manager.ts`）调的，
+ * **一个参数都不传**。也就是说宿主没有任何办法把 `sourceUrl` 递进去
+ * ——光在上面那个类型里加一格是没用的。
+ *
+ * 形状照 `registerOnlyOfficeStaticResource`：在建编辑器之前注册一次。
+ */
+let 注册的配置: LegalNoticeOptions = {};
+
+/**
+ * 注册法律声明入口的配置。**要在建编辑器之前调**。
+ *
+ * 纯静态部署下至少要给 `sourceUrl`，理由见上面那一格的说明。
+ */
+export function registerLegalNotice(options: LegalNoticeOptions): void {
+  注册的配置 = { ...注册的配置, ...options };
+}
+
+/** 读回当前注册的那份（实测与调试用）。 */
+export function getLegalNoticeOptions(): Readonly<LegalNoticeOptions> {
+  return 注册的配置;
+}
 
 const BADGE_ATTR = "data-onlyoffice-legal-notice";
 
@@ -83,7 +121,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function buildPanel(legalRoot: string, productName: string) {
+function buildPanel(legalRoot: string, productName: string, sourceUrl?: string) {
   const mask = el("div", {
     position: "fixed",
     inset: "0",
@@ -153,7 +191,11 @@ function buildPanel(legalRoot: string, productName: string) {
   // 都必须能免费取得本版本的完整对应源码。在这条加上之前，这个面板里
   // 只有「按什么条款」（许可证原文）而没有「东西本身」，那一半不成立。
   // 放在第一个，因为它是这四条里唯一一条**给东西**的。
-  links.appendChild(link(legalRoot + "/source", "获取源代码"));
+  //
+  // ⚠ 给了 sourceUrl 就指它（公开仓库那条路），没给才回落到后端现打包那条。
+  // **纯静态部署下必须给**：那种部署没有进程去现打包，回落那条会 404，
+  // 而入口点开之后 404 与没有入口是一回事。
+  links.appendChild(link(sourceUrl || legalRoot + "/source", "获取源代码"));
   links.appendChild(link(legalRoot + "/LICENSE.txt", "许可证原文"));
   links.appendChild(link(legalRoot + "/3rd-Party.txt", "第三方组件声明"));
   links.appendChild(link(legalRoot + "/NOTICE.md", "修改说明"));
@@ -191,8 +233,11 @@ export function mountLegalNotice(
   container: HTMLElement,
   options: LegalNoticeOptions = {},
 ): () => void {
-  const legalRoot = (options.legalRoot ?? "/legal").replace(/\/+$/, "");
-  const productName = options.productName ?? "onlyoffice-web";
+  // 直接传进来的优先于注册的那份；两样都没有才用默认。
+  const 合并 = { ...注册的配置, ...options };
+  const legalRoot = (合并.legalRoot ?? "/legal").replace(/\/+$/, "");
+  const productName = 合并.productName ?? "onlyoffice-web";
+  const sourceUrl = 合并.sourceUrl;
 
   const existing = container.querySelector<HTMLElement>(`[${BADGE_ATTR}]`);
   if (existing) return () => existing.remove();
@@ -222,7 +267,7 @@ export function mountLegalNotice(
   badge.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    document.body.appendChild(buildPanel(legalRoot, productName));
+    document.body.appendChild(buildPanel(legalRoot, productName, sourceUrl));
   });
 
   // 容器没定位过的话，绝对定位会跑到页面别处去——那就不「显著可见」了。

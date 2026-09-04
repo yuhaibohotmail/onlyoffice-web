@@ -39,7 +39,12 @@ ONLYOFFICE 按 GNU Affero 通用公共许可证第 3 版发布，并附有 Ascen
 
 ## 三、对应源码在哪
 
-本项目的完整源码，连同重新构建它所需要的全部脚本，都在本仓库里。
+**本项目的完整源码在 <https://github.com/yuhaibohotmail/onlyoffice-web>**，
+连同重新构建它所需要的全部脚本。
+
+⚠ 许可证第 13 条要的是「**本版本**的完整对应源码」——所以部署一个版本时，
+要让界面上那个「获取源代码」指到**与它对得上的那个标签**，而不是仓库的当前状态。
+指法见 `LegalNoticeOptions.sourceUrl`（纯静态部署）或环境变量 `OOW_SOURCE_URL`（带后端时）。
 
 其中**格式转换引擎**（浏览器里那个 WebAssembly 模块）来自
 CryptPad 的 `onlyoffice-x2t-wasm`（<https://github.com/cryptpad/onlyoffice-x2t-wasm>）——

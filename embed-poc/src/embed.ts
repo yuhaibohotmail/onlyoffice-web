@@ -22,6 +22,7 @@ import {
   OnlyOfficeManager,
   ONLYOFFICE_ID,
   editorManagerFactory,
+  registerLegalNotice,
 } from "../../src";
 import {
   PROTOCOL,
@@ -49,6 +50,23 @@ if (!宿主源) {
   说("没给 hostOrigin，不知道该信谁 —— 停在这里。");
   throw new Error("missing hostOrigin");
 }
+
+/**
+ * 告诉法律声明入口「获取源代码」该指哪儿。**在建编辑器之前注册。**
+ *
+ * ⚠ **这一步在纯静态部署下是必须的，不是可选的。**
+ * 不给的话那条链接指的是 `<legalRoot>/source`，而纯静态部署里没有进程去现打源码包
+ * ——点开就是 404。许可证第 13 条要的是「凡通过网络与本程序交互的用户都能免费取得
+ * **本版本**的完整对应源码」，**入口点开之后 404 与没有入口是一回事**。
+ *
+ * 而这个 PoC 演的正是纯静态那一档（笨服务器只发文件），所以它必须在这儿给。
+ *
+ * ⚠ 真部署时这里该指**与所部署版本对得上的那个标签**，不是仓库当前状态。
+ * 「仓库里是个更新的版本」不满足「本版本」。
+ */
+registerLegalNotice({
+  sourceUrl: "https://github.com/yuhaibohotmail/onlyoffice-web",
+});
 
 function 发给宿主(m: EmbedMessage) {
   // ⚠ targetOrigin 写死，**永远不要写 "*"**。
