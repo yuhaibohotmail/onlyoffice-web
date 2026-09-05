@@ -206,6 +206,46 @@ function 找文件(urlPath) {
 
 const PORT = Number(process.argv[2] || process.env.OOW_STATIC_PORT || 3042);
 
+/**
+ * 把整套东西挂到一个路径前缀底下（`OOW_PREFIX=/oow`），默认空 = 挂在根上。
+ *
+ * ⚠ **它的用途是让这台笨服务器能重现装机时那个形状。** 装机时这一套不在站点根上
+ * ——单域名那个站的根归门户，它挂在 `/oow` 底下。而「挂在前缀下」会碰坏一整类东西：
+ * 编辑器推资源地址、插件登记表里那些地址、许可原件那三条链接，
+ * **每一条错了都不出声**（编辑器转圈、面板空着、点开 404）。
+ *
+ * 没有这一格的话，那些只能等装到机器上才第一次被试到，而那时判据最难取。
+ * 有了它，`OOW_PREFIX=/oow npm run poc:e2e` 跑的是**同一套断言**，
+ * 于是「挂在前缀下也成立」是被证明的，不是被期望的。
+ *
+ * ⚠ 这仍然是「发文件」，没有越过文件头那条纪律：它只是把 URL 前缀映射到磁盘目录，
+ * nginx 用一个 location 表达同一件事。
+ */
+const 挂载前缀 = 规范前缀(process.env.OOW_PREFIX);
+
+/**
+ * 前缀规范化。**两件事：允许不带开头斜杠，以及把 Git Bash 改写过的那种当场喊出来。**
+ *
+ * ⚠ Git Bash（MSYS）会把**看着像 Unix 路径**的参数与环境值改写成 Windows 路径：
+ * `OOW_PREFIX=/oow` 到了 node 手上是 `C:/Program Files/Git/oow`。
+ * 不管它的话，这台服务器会去要求每条 URL 都以那个鬼东西开头，于是**什么都发不出来**，
+ * 而报出来的是「服务器没起来」——一点都不指向这里。
+ *
+ * 所以推荐写法是 **`OOW_PREFIX=oow`（不带开头斜杠）**，它不像路径，MSYS 不碰它。
+ * 带斜杠的写法也照收（在真 Unix 上本来就没事）。
+ */
+function 规范前缀(v) {
+  const s = String(v || "").trim().replace(/\/+$/, "");
+  if (!s) return "";
+  if (/^[A-Za-z]:/.test(s)) {
+    throw new Error(
+      "OOW_PREFIX 被 Git Bash 改写成了 Windows 路径：" + s +
+        "\n用不带开头斜杠的写法：OOW_PREFIX=oow",
+    );
+  }
+  return s.startsWith("/") ? s : "/" + s;
+}
+
 const server = http.createServer((req, res) => {
   let urlPath;
   try {
@@ -213,6 +253,16 @@ const server = http.createServer((req, res) => {
   } catch {
     res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
     return res.end("bad url");
+  }
+
+  if (挂载前缀) {
+    // 前缀之外的一律 404。**不要「不带前缀也照发」**：那样两种地址都能用，
+    // 于是「地址拼错了」这件事在这里永远试不出来，而装机上只有带前缀那一种。
+    if (urlPath !== 挂载前缀 && !urlPath.startsWith(挂载前缀 + "/")) {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      return res.end("not found (前缀之外): " + urlPath);
+    }
+    urlPath = urlPath.slice(挂载前缀.length) || "/";
   }
 
   const f = 找文件(urlPath);
@@ -248,6 +298,9 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log("[静态] " + PORT + "  （这一半替 nginx，只发文件）");
+  // 前缀在不在都说一声：它决定了下面那张表里每条地址前面还要不要加一截，
+  // 而搞错的样子是「什么都 404」，不打出来的话两次跑出不同结果时没人知道差在哪。
+  console.log("        挂载前缀：" + (挂载前缀 || "（无，挂在根上）"));
   for (const [前缀, 目录] of 挂载) {
     console.log("        " + 前缀.padEnd(52) + " → " + path.relative(PROJECT_ROOT, 目录));
   }

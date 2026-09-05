@@ -13,12 +13,18 @@
     这个脚本 eval 之后才有 Asc.plugin 那些 API 可用——
     **插件的 API 是编辑器在运行时注入的**，不在这个包里，也不在 SDK 里。
 
-    ⚠ 这里引的是一个**稳定别名** `/plugins-bootstrap.js`，由静态服务器挂到
+    ⚠ 这里引的是一个**稳定别名** `plugins-bootstrap.js`，由静态服务器挂到
     `<静态根>/sdkjs-plugins/v1/plugins.js` 上。不这么做的话这份 HTML 里就得写死
     静态资源的版本号，而那个号只有盘上一处真相——写死等于造第二份，
     而两份对不上的样子是「插件一片空白」，不报错。nginx 那边也是一条 location 的事。
+
+    ⚠ **写成 `../` 开头的相对地址，不写 `/` 开头的绝对地址**（2026-09-04 改）。
+    本页是 `<挂载前缀>/plugin/index.html`，所以 `../plugins-bootstrap.js` 落在
+    `<挂载前缀>/plugins-bootstrap.js` 上——挂在站点根上与挂在 `/oow` 底下**同一条路**。
+    原先写死 `/plugins-bootstrap.js`，挂前缀时它去站点根要，404，
+    而症状是插件报 `boot-failed`、面板空着，**一句错都不指向这一行**。
   -->
-  <script type="text/javascript" src="/plugins-bootstrap.js"></script>
+  <script type="text/javascript" src="../plugins-bootstrap.js"></script>
   <style>
     html, body { margin: 0; padding: 0; height: 100%; }
     body { font: 13px/1.6 system-ui, "Microsoft YaHei", sans-serif; color: #222;

@@ -18,7 +18,28 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const POC = path.resolve(HERE, "..");
 const 静态口 = Number(process.env.OOW_STATIC_PORT || 3042);
 const mock口 = Number(process.env.OOW_MOCK_PORT || 3043);
-const 静态 = "http://127.0.0.1:" + 静态口;
+/**
+ * 整套东西挂在哪个路径前缀下。**默认空 = 挂在根上**，与从前逐字一样。
+ *
+ * 给了 `OOW_PREFIX=/oow` 就把同一套断言在**装机时那个形状**下再跑一遍
+ * ——那才是真部署的样子（单域名那个站的根归门户）。
+ * 挂在前缀下会碰坏一整类东西：编辑器推资源地址、插件登记表里的地址、
+ * 那三条许可链接，**每一条错了都不出声**。
+ */
+// ⚠ 推荐 `OOW_PREFIX=oow`（**不带开头斜杠**）：Git Bash 会把看着像 Unix 路径的
+//   环境值改写成 Windows 路径（`/oow` → `C:/Program Files/Git/oow`），
+//   而那种情况下的症状是「服务器没起来」，一点都不指向前缀。带斜杠的也照收。
+const 挂载前缀 = (() => {
+  const s = String(process.env.OOW_PREFIX || "").trim().replace(/\/+$/, "");
+  if (!s) return "";
+  if (/^[A-Za-z]:/.test(s)) {
+    console.error("OOW_PREFIX 被 Git Bash 改写成了 Windows 路径：" + s
+      + "\n用不带开头斜杠的写法：OOW_PREFIX=oow");
+    process.exit(2);
+  }
+  return s.startsWith("/") ? s : "/" + s;
+})();
+const 静态 = "http://127.0.0.1:" + 静态口 + 挂载前缀;
 const 宿主 = "http://127.0.0.1:" + mock口;
 
 const 进程们 = [];
@@ -81,7 +102,8 @@ try {
   // ── 0 · 预生成登记表（装机时该做的那一步）──────────────────────────────
   console.log("───── 预生成插件登记表 ─────");
   await new Promise((resolve) => {
-    const p = spawn(process.execPath, [path.join(POC, "server", "pregenerate-plugins.mjs")], {
+    const p = spawn(process.execPath, [path.join(POC, "server", "pregenerate-plugins.mjs"),
+      ...(挂载前缀 ? ["--prefix", 挂载前缀] : [])], {
       stdio: "inherit",
     });
     p.on("exit", resolve);

@@ -25,6 +25,12 @@ import {
   FILE_TYPE,
   getStaticResource,
 } from "../../src";
+import { 按本页位置登记静态资源 } from "./mount-prefix";
+
+// ⚠ **必须在这里、在任何 getStaticResource() 之前**：那个函数算完会把结果缓存住，
+// 先读过一次再登记就不生效了，而症状是这一页照跑、只是每条资源都 404。
+// 为什么按本页位置推、为什么末尾拼 /packages，见 mount-prefix.ts。
+按本页位置登记静态资源();
 
 const 结论框 = document.getElementById("结论")!;
 const 行: string[] = [];

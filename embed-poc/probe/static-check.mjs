@@ -78,7 +78,10 @@ const 控制台错误 = [];
 const 插件请求 = new Map();
 const 全部失败 = [];
 页.on("response", (r) => {
-  const u = decodeURIComponent(r.url().replace(基地址, ""));
+  // ⚠ **只剥「源」，不剥带前缀的基地址。** 剥掉 `http://127.0.0.1:3042/oow` 的话，
+  // 记下来的是 `/packages/…`，而登记表里那些条目是 `/oow/packages/…`——
+  // 两边永远对不上，症状是「编辑器一条都没取到」，而它其实条条都取到了。
+  const u = decodeURIComponent(r.url().replace(new URL(基地址).origin, ""));
   if (u.includes("plugin")) 插件请求.set(u, r.status());
   if (r.status() >= 400) 全部失败.push(r.status() + " " + u.slice(0, 140));
 });
@@ -111,7 +114,11 @@ const 根 = 结果.根;
 console.log("\n静态根：" + 根);
 
 // ── ① ──
-const 登记表地址 = 基地址 + 根 + "/plugins.json";
+// ⚠ **用 new URL 拼，别用字符串加号。** `根` 是**以斜杠开头的绝对路径**
+//（挂在前缀下时它已经带着前缀了，如 `/oow/packages/…`），
+// 而 `基地址` 也带着前缀，直接相加会拼出 `/oow/oow/packages/…` —— 404。
+// new URL 里绝对路径会整段顶掉 base 的路径部分，两种挂法都对。
+const 登记表地址 = new URL(根 + "/plugins.json", 基地址).href;
 const 登记表状态 = await 取(登记表地址);
 let 条目表 = [];
 if (登记表状态 === 200) {
@@ -132,12 +139,19 @@ function 条目路径(c) {
 
 let 通 = 0;
 const 不通 = [];
+// ⚠ 与上面登记表那条同一个道理：`条目路径()` 回的是**绝对路径**
+//（挂前缀时已带着前缀），用加号接在同样带前缀的 `基地址` 后面会拼出 `/oow/oow/…`。
 for (const c of 条目表) {
-  const s = await 取(基地址 + 条目路径(c));
+  const s = await 取(new URL(条目路径(c), 基地址).href);
   if (s === 200) 通++;
   else 不通.push([c, s]);
 }
-const 反向 = await 取(基地址 + 根 + "/sdkjs-plugins/{00000000-0000-0000-0000-000000000000}/config.json");
+// ⚠ **这一条尤其不能用加号拼。** 它靠「编造的地址取不到」来证明上面那几条不是恒真，
+// 而双拼前缀之后它 404 的原因变成了「路径拼错了」——**理由换了，结论看着没变**，
+// 于是这道有效性证明本身变成假的。
+const 反向 = await 取(
+  new URL(根 + "/sdkjs-plugins/{00000000-0000-0000-0000-000000000000}/config.json", 基地址).href,
+);
 
 console.log("\n① 那些地址取不取得到（node 直接问，与浏览器无关）");
 console.log("   这一趟的登记表是：" + 档);

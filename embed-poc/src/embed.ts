@@ -24,6 +24,7 @@ import {
   editorManagerFactory,
   registerLegalNotice,
 } from "../../src";
+import { 按本页位置登记静态资源, 本页挂载前缀 } from "./mount-prefix";
 import {
   PROTOCOL,
   isProtocolMessage,
@@ -65,8 +66,17 @@ if (!宿主源) {
  * 「仓库里是个更新的版本」不满足「本版本」。
  */
 registerLegalNotice({
+  // ⚠ **这三份原件的地址也要带上挂载前缀。** 默认是站点根下的 `/legal`，
+  // 挂在 `/oow` 底下时那三条链接会去站点根要，**点开就是 404**——
+  // 而附加条款第三条要的是「用户拿得到许可信息」，**入口点开之后 404 与没有入口是一回事**。
+  // 页面本身照常打得开，所以这一条不真去点一下是看不见的。
+  legalRoot: 本页挂载前缀() + "/legal",
   sourceUrl: "https://github.com/yuhaibohotmail/onlyoffice-web",
 });
+
+// 按本页所在位置告诉组件去哪儿取静态资源。**必须在开编辑器之前**。
+// 为什么是推出来的、为什么末尾要拼 /packages，见 mount-prefix.ts。
+按本页位置登记静态资源();
 
 function 发给宿主(m: EmbedMessage) {
   // ⚠ targetOrigin 写死，**永远不要写 "*"**。
