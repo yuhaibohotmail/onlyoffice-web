@@ -1,5 +1,18 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+
+/**
+ * 本次构建对应的版本号，取自 `package.json`。
+ *
+ * 接入页拿它拼「获取源代码」那条链接指向的**标签**（见 `embed-poc/src/embed.ts`）。
+ * ⚠ **从这里推、不在代码里再写一个**：许可证第 13 条要的是「**本版本**」的对应源码，
+ * 而两处各写一个版本号必然漂——漂了之后那条链接会指向**另一个版本**的源码，
+ * 而它照样是 200，没有任何东西会说不对。
+ */
+const 版本 = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+).version as string;
 
 /** 入口路径要用绝对的：rollup 的 `input` 是**相对当前工作目录**解析的，不是相对这份配置。 */
 const 这里 = (p: string) => fileURLToPath(new URL(p, import.meta.url));
@@ -41,6 +54,9 @@ export default defineConfig({
    * 挂 `/oow` → `/oow/assets/…`，都不需要有人告诉它挂在哪。
    */
   base: "./",
+  define: {
+    __OOW_VERSION__: JSON.stringify(版本),
+  },
   worker: {
     format: "es",
   },

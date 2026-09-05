@@ -33,6 +33,8 @@
  *   node embed-poc/probe/legal-links.mjs [静态地址]
  */
 
+import { readFileSync } from "node:fs";
+
 import { chromium } from "playwright";
 
 const 静态 = (process.argv[2] || "http://127.0.0.1:3042").replace(/\/+$/, "");
@@ -119,6 +121,28 @@ const 源码链接 = 链接.find((x) => x.文字.includes("源代码"));
         ? " —— 纯静态那一档没配 sourceUrl，点开会 404"
         : "")
     : "根本没有这条链接",
+);
+
+/**
+ * ③b 它指的是**本版本那个标签**，不是默认分支。
+ *
+ * ⚠ 上面那一条只问「是不是个外部地址」，**指到默认分支照样过**
+ * ——而许可证第 13 条要的是「**本版本**」的对应源码：
+ * 指默认分支时用户拿到的是另一份代码，**而那条链接照样打得开**。
+ * 这一条就是为了把那种「看着对」的情况判红。
+ *
+ * 判据取 `package.json` 的 `version`（构建期注入的就是它），
+ * 所以「改了版本号忘了重建产物」也会在这里红。
+ * ⚠ 它**盖不住「标签没推上去」**：那要连网去问 GitHub，而这一族探针不连网。
+ * 那一半靠发布规矩（见 embed.ts 那段注释的两步）。
+ */
+const 版本 = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+).version;
+断言(
+  "「获取源代码」指的是本版本那个标签（不是默认分支）",
+  !!源码链接 && 源码链接.地址.endsWith("/tree/v" + 版本),
+  (源码链接 ? 源码链接.地址 : "（没有这条链接）") + "  ← 期望以 /tree/v" + 版本 + " 结尾",
 );
 
 // ④ 另外三条（本机静态文件）真的取得到
