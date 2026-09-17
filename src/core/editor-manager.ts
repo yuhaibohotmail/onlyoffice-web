@@ -95,6 +95,8 @@ export type CreateEditorViewOptions = {
   plugins?: OnlyOfficePluginsConfig;
   /** 【本项目新增 2026-08-30】编辑器还是查看器，见 OnlyOfficeEditorVariant */
   variant?: OnlyOfficeEditorVariant;
+  /** 【本项目新增 2026-09-17】界面上给不给下载 / 另存，默认给。见 grantDownloadForExport */
+  allowDownload?: boolean;
 };
 
 /**
@@ -241,6 +243,8 @@ export class EditorManager {
   private pluginsConfig?: OnlyOfficePluginsConfig;
   /** 【本项目新增 2026-08-30】见 OnlyOfficeEditorVariant */
   private variant: OnlyOfficeEditorVariant = "editor";
+  /** 【本项目新增 2026-09-17】见 grantDownloadForExport */
+  private allowDownload = true;
   /** 与容器一一对应，供事件与 Connector 使用同一稳定路由键。 */
   private instanceId: string;
   private containerId: string;
@@ -569,6 +573,9 @@ export class EditorManager {
       // 允许接受/拒绝文档内已有修订；不自动进入「修订」录制模式
       review: true,
       print: false,
+      // 【本项目新增 2026-09-17】为假时编辑器按「不许下载」加载：文件菜单里没有「下载为」
+      // 和另存面板。组件自己导出时要临时放开，见 grantDownloadForExport。
+      download: this.allowDownload,
     };
   }
 
@@ -1349,10 +1356,70 @@ export class EditorManager {
       return this.server.getDocumentSnapshot();
     }
 
-    return await this.server.captureCurrentDocument(() => {
-      this.installIframeProxies();
-      this.editor?.downloadAs("bin");
-    });
+    // 【本项目修改 2026-09-17】allowDownload 为假时，导出期间临时放开下载权限，见 grantDownloadForExport。
+    const restoreDownload = this.grantDownloadForExport();
+    try {
+      return await this.server.captureCurrentDocument(() => {
+        this.installIframeProxies();
+        this.editor?.downloadAs("bin");
+      });
+    } finally {
+      restoreDownload();
+    }
+  }
+
+  /**
+   * 【本项目新增 2026-09-17】`allowDownload: false` 时，让组件自己的导出照常工作。
+   *
+   * 编辑器按 `permissions.download: false` 加载之后，界面上的下载 / 另存入口都不出现，
+   * 这正是要的。但组件自己导出（存回服务器之前那一步）走的也是 `downloadAs` 命令，
+   * 而文字、表格、演示、PDF 四个编辑器的 `onDownloadAs` 第一句都是「`canDownload` 为假就拒绝」
+   * （报 AccessDeny）——不处理的话，关掉下载就等于关掉了保存。
+   *
+   * 所以导出期间把编辑器 `Main` 控制器上的 `appOptions.canDownload` 临时置真，导出完放回去。
+   * 界面上的下载入口是加载时按权限建的，这段时间里不会冒出来。
+   *
+   * ⚠ **拿不到 `Main` 控制器就直接抛错，不去碰运气**：那样发下去的 downloadAs 必然被拒，
+   * 而被拒只是编辑器里一条报错，导出那边等到超时才知道。拿不到通常是编辑器 iframe 跨源
+   * （静态资源与页面不同源），或者编辑器还没加载完。
+   *
+   * ⚠ 用的是 `DE / SSE / PE / PDFE / VE` 这几个应用全局对象。`getShellMainController`
+   * 只认 `DE / PE`，表格和普通 PDF 拿不到，所以这里单独写一份，不去改它（它还管着别的事）。
+   */
+  private grantDownloadForExport(): () => void {
+    if (this.allowDownload) {
+      return () => {};
+    }
+
+    const win = this.getEditorFrameWindow() as
+      | (OnlyOfficeIframeWindow &
+          Partial<
+            Record<
+              "DE" | "SSE" | "PE" | "PDFE" | "VE",
+              {
+                getController?: (name: string) =>
+                  | { appOptions?: { canDownload?: boolean } }
+                  | undefined;
+              }
+            >
+          >)
+      | undefined;
+    const appOptions = (["DE", "SSE", "PE", "PDFE", "VE"] as const)
+      .map((key) => win?.[key]?.getController?.("Main")?.appOptions)
+      .find((options) => options !== undefined);
+
+    if (!appOptions) {
+      throw new Error(
+        "allowDownload 为 false 时，导出要临时放开编辑器的下载权限，但够不到编辑器里的 Main 控制器" +
+          "（编辑器 iframe 跨源，或者编辑器还没加载完）",
+      );
+    }
+
+    const previous = appOptions.canDownload;
+    appOptions.canDownload = true;
+    return () => {
+      appOptions.canDownload = previous;
+    };
   }
 
   /**
@@ -1808,6 +1875,7 @@ export class EditorManager {
     this.uiTheme = options.theme || "theme-white";
     this.pluginsConfig = options.plugins;   // 【本 PoC 新增】
     this.variant = options.variant ?? "editor";   // 【本项目新增 2026-08-30】
+    this.allowDownload = options.allowDownload ?? true;   // 【本项目新增 2026-09-17】
 
     this.syncEditorBridge();
     this.mountDocEditor();

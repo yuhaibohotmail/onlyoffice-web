@@ -187,6 +187,8 @@ async function 打开(cmd: OpenCommand) {
         defaultFileName: cmd.fileName,
         lang: (cmd.lang as "zh") || "zh",
         readOnly: cmd.readOnly,
+        // 【2026-09-17 新增】不给就是允许，见 protocol.ts。
+        allowDownload: cmd.allowDownload,
         loadSession,
         // 原样递过去，一个字段都不看——见 protocol.ts 里那段说明。
         plugins: cmd.plugins as never,
@@ -210,7 +212,21 @@ async function 打开(cmd: OpenCommand) {
 async function 存件() {
   if (!manager || !当前) throw new Error("还没打开文档");
   说("正在导出…");
-  const out = await manager.exportAsBlob();
+  /**
+   * 【2026-09-17 修改】导出抛错要告诉宿主。
+   *
+   * 原来这一步抛出去之后，被下面收消息那里的 `.catch(() => {})` 吞掉，宿主一个字都收不到，
+   * 只能一直停在「正在保存」。`allowDownload: false` 时导出多了一种失败（够不到编辑器、
+   * 放不开下载权限），所以这里补上。
+   */
+  let out: Awaited<ReturnType<OnlyOfficeManager["exportAsBlob"]>>;
+  try {
+    out = await manager.exportAsBlob();
+  } catch (err) {
+    发给宿主({ protocol: PROTOCOL, type: "failed", stage: "export", message: "导出失败：" + String(err) });
+    说("导出失败：" + String(err));
+    throw err;
+  }
 
   /**
    * ⚠ **这一格必须查。**

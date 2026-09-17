@@ -153,6 +153,17 @@ const 挂载 = [
  */
 const 类型表 = {
   ".html": "text/html; charset=utf-8",
+  /**
+   * 【2026-09-17 补】少了这一行，打开编辑器的「文件」菜单时，浏览器会下载一个 `ProgramInterface.htm`。
+   * 那是编辑器在后台加载的帮助页，回成 application/octet-stream 就被当成了文件下载，
+   * 用户每开一次菜单下载栏里就冒出一个。nginx 默认的类型表里 htm 本来就是 text/html。
+   *
+   * ⚠ **补上之后，以前打开过的浏览器还会接着下载**：这棵树回的是一年期的 immutable 长缓存，
+   * 错的那份（连同它的类型）已经存进浏览器缓存，之后根本不再来问服务器。
+   * 要在那台浏览器里清一次缓存（删除浏览数据里的「缓存的图片和文件」）。实测过：
+   * 改对之后同一个浏览器档案照样下载、请求不到服务器；全新档案不下载。
+   */
+  ".htm": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",

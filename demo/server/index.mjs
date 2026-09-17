@@ -186,6 +186,9 @@ const MIME = {
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".html": "text/html; charset=utf-8",
+  // 【2026-09-17 补】少了这一行，打开编辑器「文件」菜单时浏览器会下载一个 ProgramInterface.htm
+  // （编辑器在后台加载的帮助页）。原因与修法同 embed-poc/server/static-server.mjs 里那一行。
+  ".htm": "text/html; charset=utf-8",
   ".wasm": "application/wasm",
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
   ".gif": "image/gif", ".svg": "image/svg+xml", ".ico": "image/x-icon",

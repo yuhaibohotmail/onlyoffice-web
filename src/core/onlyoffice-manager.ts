@@ -75,6 +75,16 @@ export type OnlyOfficeManagerOptions = {
    * 完整对照见 editor-manager.ts 里 OnlyOfficeEditorVariant 的说明。
    */
   variant?: OnlyOfficeEditorVariant;
+  /**
+   * 【本项目新增 2026-09-17】界面上给不给下载 / 另存。默认给。
+   *
+   * 设为 `false` 之后，文件菜单里没有「下载为」和另存面板；
+   * `exportAsBlob()` 照常能用（组件导出时临时放开，见 editor-manager.ts 的 grantDownloadForExport）。
+   *
+   * ⚠ **这只是把界面入口关掉，不是防护**：纯浏览器方案要把原文件整个下到浏览器里才能打开，
+   * 有心人从开发者工具里照样拿得到。
+   */
+  allowDownload?: boolean;
 };
 
 export type OpenDocumentInput = {
@@ -106,6 +116,8 @@ export class OnlyOfficeManager {
   private plugins?: OnlyOfficePluginsConfig;
   /** 【本项目新增 2026-08-30】见 OnlyOfficeEditorVariant */
   private variant?: OnlyOfficeEditorVariant;
+  /** 【本项目新增 2026-09-17】见 OnlyOfficeManagerOptions.allowDownload */
+  private allowDownload?: boolean;
   private ready = false;
 
   private constructor(
@@ -120,6 +132,7 @@ export class OnlyOfficeManager {
     this.officeXmlEvent = options.officeXmlEvent;
     this.plugins = options.plugins;   // 【本 PoC 新增】
     this.variant = options.variant;   // 【本项目新增 2026-08-30】
+    this.allowDownload = options.allowDownload;   // 【本项目新增 2026-09-17】
     if (options.user) {
       editor.setUser(options.user);
     }
@@ -218,6 +231,7 @@ export class OnlyOfficeManager {
       officeXmlEvent: input.officeXmlEvent ?? this.officeXmlEvent,
       plugins: this.plugins,   // 【本 PoC 新增】
       variant: this.variant,   // 【本项目新增 2026-08-30】
+      allowDownload: this.allowDownload,   // 【本项目新增 2026-09-17】
     });
 
     this.readOnly = readOnly;
