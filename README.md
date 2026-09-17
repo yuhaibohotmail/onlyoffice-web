@@ -1,316 +1,317 @@
 # onlyoffice-web
 
-**我们自己维护的浏览器版 OnlyOffice 前端组件，从社区版构建。**
+**A browser-only ONLYOFFICE front-end component, built from the Community Edition and maintained by us.**
 
-不需要文档服务器：编辑器跑在浏览器里，协作协议由一个跑在同一个标签页内的模拟服务应答，
-格式转换由编译成 WebAssembly 的 ONLYOFFICE 转换引擎在浏览器里完成。
+No Document Server is needed: the editors run in the browser, the collaboration protocol is answered
+by a mock server running inside the same tab, and format conversion happens in the browser through
+the ONLYOFFICE conversion engine compiled to WebAssembly.
 
-本项目**按 AGPL-3.0 发布**，并遵守 Ascensio System SIA 补充的五条附加条款。
-它是一个**修改过的版本**，原始软件是 Ascensio System SIA 开发的 ONLYOFFICE。
-改了什么、什么时候改的，见 [NOTICE.md](NOTICE.md)——那份文件是许可要求的一部分，不是可选文档。
+The project is self-contained: it ships its own front end, back end, plugins and automated tests,
+and does not connect to any external service.
 
-## 与 weihai-smart-education 的关系
+This project is **released under AGPL-3.0** and complies with the five additional terms added by Ascensio System SIA.
+It is a **modified version** of ONLYOFFICE, originally developed by Ascensio System SIA.
+What was changed and when is recorded in [NOTICE.md](NOTICE.md). That file is part of the license obligations, not optional documentation.
 
-**并列，互不依赖。** 那个仓库将来经 iframe 用它，不 import 它。
-本项目自己有一套完整的前端、后端、插件与自动实测，不连那边任何服务。
+## Two rules we do not break
 
-## 两条不要越过的线
+1. **Having accepted the AGPL, we comply with it for real.** No white-labeling, no fabricated license to unlock
+   commercial-edition features, no third-party trademarks. The legal notice entry in the UI is mandatory, not optional:
+   additional term 3 states explicitly that a notice in the source code alone is not enough.
+2. **Static assets come only from the Community Edition image.** The assets in the upstream component package
+   were extracted from the Developer Edition image (commercial license); not a single byte of them is used.
+   The license headers of the two are identical word for word: **the code is the same, only the distribution
+   terms differ**, so switching the source loses no functionality.
+   `scripts/extract-assets.mjs` stops immediately if the image name contains `-de` or `-ee`.
 
-1. **接受了 AGPL，就要真的做到。** 不白标、不伪造授权解锁商业版功能、不用别家的商标。
-   界面上那个法律声明入口是硬要求，不是可选项——附加条款第三条明写「在源码里写了不算」。
-2. **静态资源只从社区版镜像来。** 上游那个组件包的资源抽自 Developer Edition
-   （商业授权）镜像，一个字节都不要用。两边的许可声明头逐字一致，
-   **代码是同一份，差别在分发条款不在代码**，所以换源不丢功能。
-   `scripts/extract-assets.mjs` 见到镜像名里有 `-de` / `-ee` 会直接停。
+## Running it
 
-## 怎么跑
-
-需要 Node 22 以上。前三条各跑一次就行，之后只跑后两条。
+Requires Node 22 or later. `npm install` and the three fetch steps are one-time setup; after that you only need `server` and `dev`.
 
 ```sh
 npm install
-npm run assets     # 从社区版镜像抽静态资源（约 1.5 GB，走 ssh 到跑着镜像的机器上）
-npm run x2t        # 取格式转换引擎（6.5 MB，核官方校验和）
-npm run fonts      # 配导出 PDF 用的字体（7 MB，逐个核对粗斜）
+npm run assets     # extract static assets from the Community Edition image (~1.5 GB; local docker, or ssh to a host running the image)
+npm run x2t        # fetch the conversion engine (6.5 MB, verified against the official checksum)
+npm run fonts      # set up the fonts used for PDF export (7 MB, bold/italic verified one by one)
 
-npm run server     # 3041：取件 / 存件 / 伺服静态资源、插件与许可原件
-npm run dev        # 3040：页面
-npm run e2e        # 自动实测（17 条，判据全部取东西本身）
+npm run server     # 3041: document fetch / save, serves static assets, plugins and license texts
+npm run dev        # 3040: the page
+npm run e2e        # automated tests (17 cases; every assertion checks the artifact itself)
 ```
 
-几条随手能跑的检查。**前三条零设施、亚秒级**，后面几条要两个服务起着 + 真浏览器：
+Some quick checks. **The first three need no infrastructure and finish in under a second**; the rest need both servers running plus a real browser:
 
 ```sh
-npm run check:legal    # 合规那几条在代码里还立着吗（自带回退探针）
-npm run check:fonts    # 每个字体文件里装的真的是它名字说的那一款吗（自带反向探针）
-npm run check:rule     # 我们照抄编辑器的那条规则，原文还是不是那样
+npm run check:legal    # are the compliance requirements still in place in the code (with a built-in revert probe)
+npm run check:fonts    # does each font file really contain the typeface its name says (with a built-in reverse probe)
+npm run check:rule     # is the editor rule we copied still worded the same upstream
 
-npm run check:404              # 打开文档时有没有取不到的东西
-npm run check:404 -- --pdf     # 同上，换成打开 PDF
-npm run check:404 -- --viewer  # 同上，换成查看器那一档
-                               # ⚠ 三条路加载的是三个不同的应用，只跑第一条等于只看了三分之一
-npm run check:formats        # 各种格式逐个打开一遍，出一张表（16 份，约 5 分钟）
-npm run measure:payload      # 打开一份文档下了多少东西：编辑器一遍查看器一遍，冷载暖载各一次
-node scripts/probe-pdf-routing.mjs   # 两种 PDF 各去各的应用了吗
+npm run check:404              # does anything fail to load when opening a document
+npm run check:404 -- --pdf     # same, opening a PDF
+npm run check:404 -- --viewer  # same, using the viewer
+                               # ⚠ these three load three different apps; running only the first covers a third of it
+npm run check:formats        # open every format in turn and print a table (16 files, ~5 minutes)
+npm run measure:payload      # how much is downloaded to open a document: editor and viewer, cold and warm load each
+node scripts/probe-pdf-routing.mjs   # does each of the two PDF kinds go to the right app
 ```
 
-各种格式那一组的测试文档要先生成一次（约 1 分钟，要那台跑着镜像的机器）：
+The test documents for the format checks have to be generated once (~1 minute, needs the host running the image):
 
 ```sh
 npm run fixtures:formats
 ```
 
-**把这个组件嵌进别人页面里**的示例与实测另有一套，它自足、与上面那些互不相干：
+**Embedding this component in someone else's page** has its own example and tests. It is self-contained and independent of everything above:
 
 ```sh
-npm run poc:build     # 构建它那三个页面
-npm run poc:e2e       # 起服务器、跑完七趟、停掉（其中一趟**期望红**）
+npm run poc:build     # build its three pages
+npm run poc:e2e       # start the servers, run all seven passes, stop them (one pass is **expected to fail**)
 ```
 
-它答的是「换成 nginx 这种只发文件的服务器还正不正常」「凭据每次现要那条约定成不成立」
-这一类问题，读数在 [embed-poc/README.md](embed-poc/README.md)。
+It answers questions such as "does it still work behind a server that only serves files, like nginx" and
+"does the rule of requesting fresh credentials every time hold". Results are in [embed-poc/README.md](embed-poc/README.md).
 
-## 打包与发布
+## Build and release
 
 ```sh
-npm run build      # 前端产物 → dist/（约 1.4 MB）
-npm run release    # 装配整套 → release/onlyoffice-web-<版本>/（含 vendor，约 1.5 GB，要几分钟）
-npm run release -- --no-vendor    # 目标机上已经有 vendor 时
+npm run build      # front-end bundle → dist/ (~1.4 MB)
+npm run release    # assemble the full package → release/onlyoffice-web-<version>/ (includes vendor, ~1.5 GB, takes a few minutes)
+npm run release -- --no-vendor    # when the target machine already has vendor
 ```
 
-⚠ **`dist/` 自己跑不起来**，它只是前端那一半。整套还差两样：**后端进程**，
-以及 **`vendor/`**（编辑器本体、转换引擎、字体，约 1.5 GB）。
-而 `vendor/` **不进 git**，取它的 `npm run assets` 要 ssh 到跑着社区版镜像的机器上
-——目标机上跑不了那条，所以它必须跟着发布包走。`npm run release` 做的就是这件事。
+⚠ **`dist/` cannot run on its own**; it is only the front-end half. The full package also needs two things: **the back-end process**,
+and **`vendor/`** (the editors, the conversion engine and fonts, ~1.5 GB).
+`vendor/` is **not in git**, and `npm run assets`, which fetches it, needs ssh access to a host running the Community Edition image.
+That command cannot run on the target machine, so vendor has to travel with the release package. This is what `npm run release` does.
 
-装出来的包里是**整棵源码树 + `dist/` + `vendor/` + 一份 `部署说明.md`**，
-目录结构与仓库里一模一样。**后端零第三方依赖**（只用 `node:` 内置），
-所以发布包里不需要 `node_modules`，目标机上也不用 `npm install`。
+The package contains **the full source tree + `dist/` + `vendor/` + a deployment guide (`部署说明.md`)**,
+with the same directory layout as the repository. **The back end has no third-party dependencies** (only `node:` built-ins),
+so the package needs no `node_modules` and the target machine needs no `npm install`.
 
-⚠ **源码那一份不能从包里删**：后端的 `/legal/source.tar.gz` 是拿运行时的项目根现打包的
-（AGPL 第 13 条那条义务），少了源码它会发出一个残缺的包，**而且照样回 200**。
+⚠ **Do not remove the source from the package**: the back end builds `/legal/source.tar.gz` on the fly from the project root at runtime
+(the obligation in AGPL section 13). Without the source it serves an incomplete archive, **and still returns 200**.
 
-三条自带的检查，都是出过问题之后才加的：
-`dist/` 比源码旧当场拒绝装配（否则装出来的包跑的是上一版前端，没有任何东西说一句）；
-`vendor` 缺件当场停并给出该跑哪条命令；装完再自证那七样东西都在。
+Three built-in checks, each added after something actually went wrong:
+assembly refuses to run if `dist/` is older than the source (otherwise the package ships the previous front end and nothing says a word);
+it stops if anything in `vendor` is missing and tells you which command to run; and after assembling it verifies that all seven required pieces are present.
 
-### 跑起来要配什么
+### Runtime configuration
 
-| 环境变量 | 干什么 | 不设会怎样 |
+| Environment variable | Purpose | If unset |
 |---|---|---|
-| `OOW_TOKEN_SECRET` | 签票的密钥，至少 16 位 | **每次启动现生成一把随机的**，重启后旧票全失效（本机开发正好，真实部署要设） |
-| `OOW_SOURCE_URL` | 源码仓库地址（本项目是 <https://github.com/yuhaibohotmail/onlyoffice-web>） | 界面上「获取源代码」改成由本服务现打一个包给人下 |
+| `OOW_TOKEN_SECRET` | Secret used to sign tickets, at least 16 characters | **A random secret is generated at every start**, so all old tickets become invalid after a restart (fine for local development; set it for real deployments) |
+| `OOW_SOURCE_URL` | URL of the source repository (for this project: <https://github.com/yuhaibohotmail/onlyoffice-web>) | The "Get source code" link in the UI serves an archive built on the fly by this server instead |
 
-前端那一半要有一个 web 服务器伺服 `dist/`，并把 `/api`、`/packages`、`/plugins`、`/legal`
-四条转到后端。⚠ **必须同源**——编辑器在 iframe 里、插件又在编辑器里再开一个 iframe，
-任何一层跨源，父页面就什么都读不到，**而症状是「编辑器一直不出来」**。
-dev 与 `vite preview` 下这件事由 vite 代劳（`demo/vite.config.ts` 里那四条反代），
-换成 nginx 就得自己配。
+The front-end half needs a web server that serves `dist/` and forwards four paths, `/api`, `/packages`, `/plugins` and `/legal`,
+to the back end. ⚠ **Everything must be same-origin**: the editor runs in an iframe and plugins open another iframe inside the editor;
+if any layer is cross-origin, the parent page cannot read anything, **and the symptom is "the editor never shows up"**.
+Under `dev` and `vite preview`, vite handles this (the four proxies in `demo/vite.config.ts`);
+with nginx you have to configure it yourself.
 
-⚠ **反代要把 `Host` 原样传过去**（或设 `X-Forwarded-Host` / `X-Forwarded-Proto`）。
-后端拿它拼插件登记表里的绝对地址。**这一条 2026-08-30 之前是写死的**，
-后果实测过：把产物起在 3050，文档照样打开（纸张 363810）、照样导出（48607 字节）、
-法律入口照样在，**只有插件面板是 0 个**（3040 上是 2 个），控制台 13 条连接被拒。
-现在改成按请求现拼，同一趟重测插件面板回到 2 个、控制台只剩那条已知的上游 404。
+⚠ **The reverse proxy must pass `Host` through unchanged** (or set `X-Forwarded-Host` / `X-Forwarded-Proto`).
+The back end uses it to build the absolute URLs in the plugin registry. **Before 2026-08-30 this was hard-coded**,
+and the consequence was measured: with the build served on port 3050, documents still opened, export still worked (48,607 bytes)
+and the legal notice entry was still there, **but the plugin panel showed 0 plugins** (2 on port 3040), with 13 connection-refused errors in the console.
+It is now built per request; the same test rerun shows 2 plugins again, and the console has only the one known upstream 404 left.
 
-⚠ **抽资源要一个跑着那个社区版镜像的容器。** 默认用**本机的 docker**
-（`config.mjs` 里 `DOCUMENT_SERVER.host` 是空的）。
-本机没有 docker 时，把那一格填一台跑着镜像的机器，脚本会 ssh 过去做
-——也可以不动那个文件，用环境变量 `OOW_DS_HOST` 临时指一台。
+⚠ **Extracting the assets needs a container running the Community Edition image.** By default the **local docker** is used
+(`DOCUMENT_SERVER.host` in `config.mjs` is empty).
+If there is no local docker, fill that field with a host running the image and the script will do the work over ssh.
+Alternatively, leave the file unchanged and point the `OOW_DS_HOST` environment variable at a host for the moment.
 
-页面上那排按钮走的就是自动实测走的那几条路（都挂在 `window.__poc` 上）
-——**刻意不另写一套**，否则「手点着好使」和「脚本跑绿」会变成两件事。
+The row of buttons on the page goes through exactly the same code paths as the automated tests (all exposed on `window.__poc`).
+**This is deliberate, not a separate implementation**; otherwise "works when clicked by hand" and "the script passes" would become two different things.
 
-页面顶部有个**文档下拉框**，把服务端上现有的文档全列出来（手写的三份 + 各种格式那一组），
-选中即打开。**清单问服务端要，页面不自己列一份**——两份会漂，而漂了的样子是
-「页面上少一个格式，而没有任何东西红」。
+At the top of the page there is a **document drop-down** listing every document on the server (the three hand-written ones plus the format test set);
+selecting one opens it. **The list comes from the server; the page does not keep its own copy.** Two copies would drift apart,
+and drift would look like "one format is missing from the page, and nothing fails".
 
-旁边另有一个**界面下拉框**（编辑器 / 查看器），与文档那个**正交**——选哪一份、
-用哪一档是两件事，所以是两个控件不是一个。⚠ 还有一个「切成只读」按钮，
-**它与查看器是两档，别混**：只读是同一个应用关掉编辑（工具栏与插件面板都还在），
-查看器是换成另一个应用（两样都没有）。放两个控件就是为了让这个差别看得见——
-没打开文档时页面中间那段提示也在说同一件事。
+Next to it is a **UI drop-down** (editor / viewer), **independent of** the document drop-down: which document to open and
+which UI to use are two separate choices, hence two controls. ⚠ There is also a "switch to read-only" button,
+and **read-only and the viewer are not the same thing**: read-only is the same app with editing turned off (toolbar and plugin panel are still there),
+while the viewer is a different app (neither is present). Having both controls makes this difference visible;
+the hint in the middle of the page, shown when no document is open, says the same thing.
 
-状态行左边那个小圆点分四色（闲着 / 正在忙 / 好了 / 出错了），右边几个小标签是
-当前的格式、哪一档界面、是不是只读、以及存回去之后的版本与摘要。
-⚠ **它们只管显示，不参与任何判据**：自动实测取的是磁盘上的字节、导出的内容与画布像素，
-一处都不看界面上写了什么。
+The dot on the left of the status line has four colors (idle / busy / done / error); the small tags on the right show
+the current format, which UI is in use, whether it is read-only, and the version and digest after saving back.
+⚠ **They are for display only and no test relies on them**: the automated tests look at bytes on disk, exported content and canvas pixels,
+never at what the UI says.
 
-## 目录
+## Layout
 
 | | |
 |---|---|
-| `config.mjs` | **版本与来源的唯一事实来源**。别在别处再抄一份版本号或地址 |
-| `scripts/` | 取件与核对：抽静态资源 / 取转换引擎 / 配字体 / 核字体 / 量下载量 / 装配发布包 |
-| `release/` | `npm run release` 装出来的整套（含 vendor，约 1.5 GB）。**不进 git**，可再生 |
-| `vendor/` | 抽出来的东西，**不进 git**（约 1.5 GB，可复现）。每一堆旁边有一份 `SOURCE.json` 记着它是从哪来的 |
-| `build/x2t/` | 自己从源码编转换引擎的配方。**今天编不了**，见那份 README |
-| `src/` | **组件本体（AGPL-3.0），这个项目唯一要发布的那一份。** 本项目改过的地方都带「【本项目修改】」标记 |
-| `src/legal/` | **界面上的法律声明入口**。挂在组件里而不是页面里，见下 |
-| `demo/` | **示例那一半，不发布**：页面 + 后端 + 插件 + 夹具 + 自动实测。探针都留在这里 |
-| `demo/server/` | 后端：路由 + 签票验票 + 落盘与版本 |
-| `demo/plugin/` | 我们自己写的那个 OnlyOffice 插件 |
-| `demo/e2e/run.mjs` | 自动实测 |
-| `embed-poc/` | **把这个组件嵌进别人页面里的示例**：宿主页用 iframe 装下编辑器，两边只经 `postMessage` 说话。它自足——不依赖本仓库其余任何代码，后台服务自带。同时是六条实测（`npm run poc:e2e`，其中一趟**期望红**）。读数与容易出错的地方见 [embed-poc/README.md](embed-poc/README.md) |
-| `NOTICE.md` | 修改说明（许可要求的） |
-| `LICENSE` | AGPL-3.0 全文 + Ascensio 的五条附加条款 |
-| `poc/backend-x2t/` | ⚠ **作废，暂时原地留着。** 试过「后端也跑一份 wasm 转换引擎」那条中间路，裁定不做（理由见 `BACKEND.md`）。⚠ 它几个脚本里读 `fixtures/lesson-plan-zh.docx` 的那几行**已经指不到东西了**——夹具 2026-08-30 搬进了 `demo/`，作废的东西没跟着改。那不是它坏了，是路径过期了 |
-| `BACKEND.md` | 对照社区版容器量出来的「后端该接哪些、不接哪些」，以及上面那条裁定 |
+| `config.mjs` | **The single source of truth for versions and sources.** Do not copy a version number or URL anywhere else |
+| `scripts/` | Fetching and verification: extract static assets / fetch the conversion engine / set up fonts / check fonts / measure payload / assemble the release package |
+| `release/` | The full package built by `npm run release` (includes vendor, ~1.5 GB). **Not in git**, can be regenerated |
+| `vendor/` | Extracted files, **not in git** (~1.5 GB, reproducible). Each set has a `SOURCE.json` next to it recording where it came from |
+| `build/x2t/` | Recipe for building the conversion engine from source. **It cannot be built today**; see its README |
+| `src/` | **The component itself (AGPL-3.0), the only part of this project meant for distribution.** Every place we changed carries a comment marker starting with `【本项目修改` (modified) or `【本项目新增` (added) |
+| `src/legal/` | **The legal notice entry in the UI.** It lives in the component rather than the page; see below |
+| `demo/` | **The example half, not distributed**: page + back end + plugin + fixtures + automated tests. Probes stay here |
+| `demo/server/` | Back end: routing + ticket signing and verification + storage and versioning |
+| `demo/plugin/` | Our own ONLYOFFICE plugin |
+| `demo/e2e/run.mjs` | Automated tests |
+| `embed-poc/` | **An example of embedding this component in someone else's page**: the host page holds the editor in an iframe, and the two sides talk only through `postMessage`. It is self-contained: it depends on no other code in this repository and ships its own servers. It is also a test suite (`npm run poc:e2e`, seven passes, one of them **expected to fail**). Results and pitfalls are in [embed-poc/README.md](embed-poc/README.md) |
+| `NOTICE.md` | Modification notice (required by the license) |
+| `LICENSE` | Full AGPL-3.0 text + Ascensio's five additional terms |
+| `poc/backend-x2t/` | ⚠ **Abandoned, left in place for now.** An experiment with a middle path, running a wasm conversion engine on the back end as well; we decided against it (reasons in `BACKEND.md`). ⚠ The lines in its scripts that read `fixtures/lesson-plan-zh.docx` **no longer point to anything**: the fixtures moved into `demo/` on 2026-08-30 and the abandoned code was not updated. The code itself is fine; only the path is out of date |
+| `BACKEND.md` | Which back-end features to implement and which not, measured against the Community Edition container, plus the decision above |
 
-## 三处刻意的安排
+## Three deliberate design choices
 
-**一、法律声明入口写在组件里，不写在页面里。**
-组件是给别人引用的。声明放在示例页里，别人引用组件时就丢了，
-而丢了不会有任何东西报错——下一个引用它的人不会知道自己少了一样必须有的东西。
+**1. The legal notice entry is part of the component, not the page.**
+The component is what other people reuse. If the notice lived in the example page, it would be lost as soon as someone reused the component,
+and nothing would report it: the next person to reuse it would never know something mandatory was missing.
 
-**二、转换引擎与它的字体不放在静态资源那个版本目录里面。**
-它们是两条各自独立的版本线：今天引擎基于 core 9.3.0.140，而静态资源是 9.4.0.129。
-混在一个目录里这个差别就看不见了；分开放，两份 `SOURCE.json` 各记各的。
-后端伺服时再把它们贴到浏览器要找的那两个地址上。
+**2. The conversion engine and its fonts are not placed inside the versioned directory of the static assets.**
+They follow two independent version lines: today the engine is based on core 9.3.0.140, while the static assets are 9.4.0.129.
+In one directory that difference would be invisible; kept apart, each has its own `SOURCE.json`.
+When serving, the back end maps them onto the two URLs the browser expects.
 
-**三、`vendor/` 不进 git。**
-约 1.5 GB，而且随镜像可复现。判据是那份 `SOURCE.json` 里记的**镜像 ID**——
-不是镜像名，因为 `9.4.0.1` 这种标签是会被重推的，而 ID 不会。
+**3. `vendor/` is not in git.**
+It is about 1.5 GB and can be reproduced from the image. What pins it is the **image ID** recorded in `SOURCE.json`,
+not the image name, because a tag like `9.4.0.1` can be pushed again while an ID cannot.
 
-## 眼下的状态
+## Current status
 
-**自动实测 17 条全过**（`npm run e2e`）：取件那道门、从服务端取件画首屏、真键盘打字、
-存回服务端且磁盘上的字节真的变了、没票不许写、插件面板 / 插公式 / 文档内按钮 / 配置下发四样、
-关掉登记的对照组、官方插件登记、两种 PDF 各去各的应用、编辑器与查看器是两个不同的应用。
+**All 17 automated tests pass** (`npm run e2e`): the fetch gate, fetching from the server and rendering the first screen, typing with a real keyboard,
+saving back to the server with the bytes on disk actually changing, rejecting writes without a ticket, four plugin checks (plugin panel / inserting a formula / in-document button / delivering configuration),
+the control case with registration turned off, official plugin registration, the two PDF kinds each going to their own app, and the editor and viewer being two different apps.
 
-| 事 | 状态 |
+| Item | Status |
 |---|---|
-| 静态资源从社区版镜像抽取 | ✅ 5 个编辑器应用全在（含 PDF 与 Visio），`sdkjs-plugins` 19 项全在 |
-| 官方插件能用 | ✅ 镜像自带那 11 个已登记上，且每条登记都取得到（上游那份登记表是空壳，那正是「插件用不了」的第一个原因） |
-| PDF 打得开 | ✅ **两种 PDF 各去各的地方**：普通 PDF 进 `pdfeditor`（看和批注），OnlyOffice 自己生成的**可编辑 PDF** 进 `documenteditor`（能填能改）。后者原本会被当成普通 PDF 打开、丢掉可编辑性且不报错，2026-08-30 修好，见 FINDINGS 第十节 |
-| 各种格式打不打得开 | ⚠ **组件声明支持的 12 个格式里，11 个真的画得出来，`odp` 不行**（wasm 转换引擎崩在 `function signature mismatch`）。另外 `epub` 崩、`html` 静默挂住。老式二进制 `doc/xls/ppt` 打得开但导不出（OnlyOffice 本来就只读不写）。整张表见 FINDINGS 第十一节 |
-| 格式转换引擎 | ⚠ 用的是 CryptPad 发布的现成产物（校验和已核，比上游那份小 30%），**基于 core 9.3.0.140，与我们的 9.4.0.129 差一档**。⚠ **这一档差价是有代价的**：换上基于更新 core 的 wasm 一试，`epub` 与 `html` 就都好了。自己编要一台 Linux 加 docker，见 `build/x2t/README.md` |
-| 导出 PDF 的字体 | ✅ 全部换成可自由分发的，并修正了上游粗斜装反的问题 |
-| Visio | ⚠ `visioeditor` 应用已在树里，但**还没有一条实测碰过它**——「文件在」和「打得开」是两回事 |
-| 生产构建 | ✅ 2026-08-30 修好。此前 `npm run build` 一直失败（worker 打包格式不支持代码分割），**而 dev 一直好着**——见 FINDINGS 第十二节 |
-| 查看器 | ✅ 2026-08-30 做成了组件上的一格 `variant`（编辑器 / 查看器），实测 B16 守着。⚠ **但它省的不是下载量**：量出来同一份文档冷载 221.7 MB → 211.9 MB，只省 4.4%，省下的全是应用外壳与插件面板；盘上那个「0.5 MB 对 94.6 MB」换算不成下载量。它真正省下的是 265 个请求与一整片交互面。见 FINDINGS 第十四节 |
-| 一次打开到底下多少东西 | ⚠ **冷载 221.7 MB / 437 请求**（暖载 91 KB，长缓存是生效的）。大头不在编辑器界面上：组件那个预载 iframe 把**四个编辑器的 sdk 全拉下来**（用得到的只有一个）约 110 MB，中文字体约 85 MB，且同一个 sdk 的未压缩版与压缩版都下了。`npm run measure:payload` 现量一遍，整张表见 FINDINGS 第十四节 |
-| `mobile` / `forms` 两个入口 | ⚠ 仍然没用上，也没有一条实测碰过。`variant` 那一格只开放了 `embed` 那一档 |
-| 发布 | ⚠ **能装出一个跑得起来的整套了**（`npm run release`，实测把它当目标机跑通：文档打开、插件面板 2 个、导出 25518 字节、四条许可链接齐全）。代码已经发到公开仓库（<https://github.com/yuhaibohotmail/onlyoffice-web>）。**但还没有部署到任何机器上**，也没有 CI。往哪台机器发、走不走另一个仓库的装机体系，都还没定 |
-| 合规五条 | 见下 |
+| Static assets extracted from the Community Edition image | ✅ All 5 editor apps present (including PDF and Visio); all 19 `sdkjs-plugins` entries present |
+| Official plugins work | ✅ The 11 plugins bundled in the image are registered, and every registered entry can be fetched (the upstream registry is an empty shell, which is the first reason "plugins don't work") |
+| PDFs open | ✅ **The two kinds of PDF go to different places**: ordinary PDFs open in `pdfeditor` (view and annotate), while **editable PDFs** generated by ONLYOFFICE itself open in `documenteditor` (fill in and edit). The latter used to be opened as ordinary PDFs, losing editability without any error; fixed on 2026-08-30, see section 10 of [FINDINGS.md](FINDINGS.md) |
+| Which formats open | ⚠ **Of the 12 formats the component declares, 11 actually render; `odp` does not** (the wasm conversion engine crashes with `function signature mismatch`). In addition, `epub` crashes and `html` hangs silently. Legacy binary `doc/xls/ppt` open but cannot be exported (ONLYOFFICE only reads them, by design). Full table in section 11 of FINDINGS |
+| Conversion engine | ⚠ Uses the prebuilt binary published by CryptPad (checksum verified, 30% smaller than the upstream one), **based on core 9.3.0.140, one release behind our 9.4.0.129**. ⚠ **That gap has a real cost**: a wasm based on a newer core fixes both `epub` and `html`. Building it ourselves needs Linux plus docker; see `build/x2t/README.md` |
+| Fonts for PDF export | ✅ All replaced with freely redistributable fonts, and upstream's swapped bold/italic fixed |
+| Visio | ⚠ The `visioeditor` app is in the tree, but **no test has touched it yet**. "The files are there" and "it opens" are two different things |
+| Production build | ✅ Fixed on 2026-08-30. Before that, `npm run build` always failed (the worker bundle format did not support code splitting), **while dev kept working** (see section 12 of FINDINGS) |
+| Viewer | ✅ Added on 2026-08-30 as a `variant` option on the component (editor / viewer), covered by test B16. ⚠ **But it does not reduce download size**: measured cold load for the same document goes from 221.7 MB to 211.9 MB, only 4.4% less, all of it the app shell and plugin panel; the "0.5 MB vs 94.6 MB" on disk does not translate into download size. What it really saves is 265 requests and most of the interactive UI. See section 14 of FINDINGS |
+| How much one document open downloads | ⚠ **Cold load 221.7 MB / 437 requests** (warm load 91 KB, so long-term caching is working). Most of it is not the editor UI: the component's preload iframe downloads **the SDKs of all four editors** (only one is used), about 110 MB; Chinese fonts are about 85 MB; and both the unminified and minified builds of the same SDK are downloaded. `npm run measure:payload` measures it again; full table in section 14 of FINDINGS |
+| `mobile` / `forms` entry points | ⚠ Still unused, and no test has touched them. The `variant` option only exposes `embed` |
+| Release | ⚠ **A complete package that runs can now be assembled** (`npm run release`, tested by running it as if on a target machine: document opens, 2 plugins in the panel, export of 25,518 bytes, all four license links present). The code is published at <https://github.com/yuhaibohotmail/onlyoffice-web>. **It has not been deployed to any machine yet**, and there is no CI |
+| The five compliance terms | See below |
 
-### 合规五条
+### The five compliance terms
 
-| 条 | 要求 | 状态 |
+| # | Requirement | Status |
 |---|---|---|
-| 1 | 保留声明与署名 | ✅ 两份许可原件随资源一起发，界面入口里可直接打开 |
-| 2 | 修改要声明（含日期、说明基于 ONLYOFFICE） | ✅ [NOTICE.md](NOTICE.md)，界面入口里也列着 |
-| 3 | 界面里要有清晰可达、显著可见的法律声明入口 | ✅ 编辑器右下角常驻按钮，点开是原始开发者 / 修改说明 / 许可三样 |
-| 4 | 不授予商标权 | ✅ 去掉了被换上去的微软 Office 图标，恢复编辑器自带标识；不白标 |
-| 5 | 非代码内容按 CC BY-SA 4.0 | ✅ 界面入口与 NOTICE 里都写明了 |
+| 1 | Retain notices and attributions | ✅ Both license texts ship with the assets and can be opened directly from the UI entry |
+| 2 | Mark modifications (with dates, stating that it is based on ONLYOFFICE) | ✅ [NOTICE.md](NOTICE.md), also listed in the UI entry |
+| 3 | A clearly reachable, prominently visible legal notice entry in the UI | ✅ A permanent button at the bottom right of the editor, which opens original developer / modification notice / license |
+| 4 | No trademark rights are granted | ✅ Removed the Microsoft Office icons that had been swapped in and restored the editor's own branding; no white-labeling |
+| 5 | Non-code content is under CC BY-SA 4.0 | ✅ Stated in both the UI entry and NOTICE |
 
-**另有 AGPL 正文第 13 条**（不在那五条附加条款里，容易漏）：凡通过网络与本程序交互的用户，
-都必须能**免费取得本版本的完整对应源码**。✅ 2026-08-30 补上：界面入口里那条
-「获取源代码」指向 `/legal/source`，由后端拿运行时的项目根**现打一个 tar.gz**
-（也可以设 `OOW_SOURCE_URL` 指向代码仓库）。那一页同时写明了另外两家的出处
-——ONLYOFFICE 本体与 x2t 不是我们写的，少了它们的出处，拿到包的人没法把手里这堆字节跟源码对上。
-⚠ 在这条补上之前，那个面板里只有「按什么条款」而没有「东西本身」，**那一半不成立**。
+**Also AGPL section 13** (not one of the five additional terms, and easy to miss): every user interacting with the program over a network
+must be able to **obtain the complete corresponding source of this version free of charge**. ✅ Added on 2026-08-30: the
+"Get source code" link in the UI entry points to `/legal/source`, where the back end **builds a tar.gz on the fly** from the project root at runtime
+(alternatively, set `OOW_SOURCE_URL` to point at the code repository). That page also states where the other two parts come from:
+ONLYOFFICE itself and x2t were not written by us, and without their origins, someone who received the package could not match those bytes to their source.
+⚠ Before this was added, the panel only said "under which terms" without providing "the thing itself", **so that half was not met**.
 
-另外：伪造的那份授权已降到最小（五个对应商业版能力的开关全关，实测不损失功能）。
+In addition: the fabricated license has been reduced to the minimum (all five switches for commercial-edition capabilities are off, and tests show no loss of functionality).
 
-## 容易出错的地方
+## Pitfalls
 
-下面每一条都真的出过。它们的共同点是**症状不指向真正的原因**，
-所以重新遇到一次要花的时间远比读一遍这张表多。
+Every item below actually happened. What they have in common is that **the symptom does not point to the real cause**,
+so running into one again costs far more time than reading this list once.
 
-**编辑器与组件**
+**Editor and component**
 
-1. **`#iframe-office-id` 跑起来之后不存在**——组件把那个 div 换掉了，编辑器 iframe 是
-   `.onlyoffice-container` 的直接子节点；body 上还有一个预载 iframe 要排掉。
-   按 id 找永远找不到，而打开文档那个 Promise 早已完成、页面显示就绪，**是个不报错的空等**。
-2. **首屏画出来 ≠ 可以导出。** canvas 一出现就调导出会挂满 30 秒再抛超时；等 1.5 秒再调则 200 ms 返回。
-3. **导出回的是 `{blob, fileName}` 不是 Blob**，而且有一格 `isOriginalFileFallback`——
-   超限时回的是**打开时那份原文件**。存件前必须查这一格，否则「保存成功」把用户改动悄悄换回原样。
-4. **三条反代（`/api` `/packages` `/plugins`）一条都不能省。** 编辑器在 iframe 里、
-   插件又在编辑器里再开一个 iframe，任何一层跨源父页面就什么都读不到
-   ——**症状是「编辑器一直不出来」，看着像编辑器坏了**。
+1. **`#iframe-office-id` does not exist at runtime**: the component replaces that div, and the editor iframe is
+   a direct child of `.onlyoffice-container`; there is also a preload iframe on body that has to be excluded.
+   Looking it up by id never finds anything, while the Promise for opening the document has long resolved and the page shows ready. **It waits forever without an error.**
+2. **First screen rendered ≠ ready to export.** Calling export as soon as the canvas appears blocks for 30 seconds and then throws a timeout; waiting 1.5 seconds first returns in 200 ms.
+3. **Export returns `{blob, fileName}`, not a Blob**, and it has an `isOriginalFileFallback` field:
+   when a limit is exceeded it returns **the original file as it was opened**. Check this field before saving, otherwise a "saved successfully" silently reverts the user's changes.
+4. **None of the three proxies (`/api`, `/packages`, `/plugins`) can be left out.** The editor runs in an iframe,
+   and plugins open another iframe inside the editor; if any layer is cross-origin the parent page cannot read anything.
+   **The symptom is "the editor never shows up", which looks like the editor is broken.**
 
-**插件**
+**Plugins**
 
-5. **文档里那个按钮画在画布上**，DOM 里按文字搜永远是零个。自动化靠扫画布像素找图标颜色定位，
-   所以插件图标做成一整块纯洋红。
-6. **按钮的检查函数里不能再发编辑器调用。** 编辑器一次只认一个调用，而引导脚本恰好在
-   检查函数返回之后紧接着发注册请求，撞上就被静默丢掉——控件建出来了、事件也发了、
-   检查也回真，**就是按钮不出现**。
-7. **一个事件名只能挂一个处理函数**，后挂的覆盖前面的，且不报错。
-8. **内容控件是「进去就整块选中」的**，光标停在里面时下一次插入会**替换**上一次的内容。插之前先 `Ctrl+End`。
-9. **插件的就绪信号要发给最顶层窗口，不是父窗口**——插件的父窗口是编辑器 iframe，
-   发给父窗口的话页面永远收不到，而插件本身一切正常。
-10. **内容控件按钮的图标是必填的**，漏了编辑器内部抛错、外面显示成「使用文档时出错」，看着像文档坏了。
-11. **连着两次贴 HTML 会让编辑器卡住不再响应**，要排队串行发。
+5. **The in-document button is drawn on the canvas**, so searching the DOM for its text always finds nothing. Automation locates it by scanning canvas pixels for the icon color,
+   which is why the plugin icon is a solid block of magenta.
+6. **Do not issue editor calls inside the button's check function.** The editor accepts only one call at a time, and the bootstrap script
+   sends the registration request right after the check function returns; a collision is silently dropped. The control gets created, the event fires,
+   the check returns true, **and the button simply never appears**.
+7. **Only one handler per event name**: a later one replaces the earlier one, without an error.
+8. **Entering a content control selects all of it**, so with the cursor inside, the next insert **replaces** the previous content. Press `Ctrl+End` before inserting.
+9. **A plugin's ready signal must be sent to the top window, not the parent window**: the plugin's parent is the editor iframe,
+   so a message sent to the parent never reaches the page, while the plugin itself works perfectly.
+10. **An icon is required for content control buttons**; without one the editor throws internally and shows "An error has occurred while working with the document", which looks like a corrupt document.
+11. **Pasting HTML twice in a row makes the editor stop responding**; queue the pastes and send them one at a time.
 
-**这台机器**
+**On Windows**
 
-12. 从 Node 里直接调 `tar` / `unzip` 会挑到 Windows 自带的那个，报「gzip: stdin: unexpected end of file」，
-    看着像归档包坏了。走 `bash -c` 且路径写成 `/e/...` 形式。
-13. **写文件时反斜杠会在中途被解释掉**：heredoc 与 `node -e` 的字符串里 `\t` 会变成制表符。
-    大文件用编辑器写；改文件时**每处替换都先数锚点命中次数，不是恰好 1 次就停手**。
-14. **组件那些文件是 CRLF 行尾**，本项目新写的是 LF。改组件文件时锚点要用 CRLF，
-    否则一次都匹配不上——而脚本会静默地什么都不做。
-15. 从容器里 tar 出来的文件是只读的，Windows 上后续覆盖写会撞权限错，
-    **而报错指着被覆盖的那个文件，看着像那个文件有问题**。抽取脚本里已经有一步统一放开权限。
+12. Calling `tar` / `unzip` directly from Node picks up the ones bundled with Windows, which report "gzip: stdin: unexpected end of file",
+    as if the archive were corrupt. Go through `bash -c` and write paths as `/e/...`.
+13. **Backslashes get interpreted along the way when writing files**: inside heredocs and `node -e` strings, `\t` turns into a tab.
+    Write large files with an editor; when patching files, **count how many times the anchor matches for every replacement, and stop unless it is exactly 1**.
+14. **The component's files use CRLF line endings**, while files newly written for this project use LF. Anchors must use CRLF when patching component files,
+    otherwise nothing matches, and the script silently does nothing.
+15. Files extracted with tar from a container are read-only, so overwriting them later on Windows fails with a permission error,
+    **and the error names the file being overwritten, which makes that file look like the problem**. The extraction script already has a step that clears the read-only flag.
 
-**验收**
+**Testing**
 
-16. **判据取东西本身，别取界面上写了什么。** 服务端那份变没变**取磁盘上的字节**，
-    插件干没干活**取导出的 docx 里找不找得到那段字**。
-17. **每趟先复位到同一个起点**，否则文档会一轮轮堆积上一轮插进去的东西，
-    「旧版里没有这些字」那条免费探针会随机失效——**而它失效的样子是全绿**。
-18. **反向断言是免费探针**：断言「新版里有 X」的同时必须断言「旧版里没有 X」。
-19. 退出码：0 全过；1 有条目没过；**2 = 一条断言都没跑**。
-20. **改完要注入一次缺陷验证判据有效。**
+16. **Check the artifact itself, not what the UI says.** To tell whether the server copy changed, **check the bytes on disk**;
+    to tell whether the plugin did its work, **check whether the text can be found in the exported docx**.
+17. **Reset to the same starting point before every run**, otherwise documents pile up content inserted by previous runs,
+    and the free probe "the old version does not contain this text" starts failing at random. **When it fails, everything looks green.**
+18. **Negative assertions are free probes**: whenever you assert "the new version contains X", also assert "the old version does not contain X".
+19. Exit codes: 0 all passed; 1 some cases failed; **2 = not a single assertion ran**.
+20. **After a change, inject a defect once to confirm the assertions still catch it.**
 
-**量下载量**（两条都不报错，出来的数还很整齐）
+**Measuring payload** (neither reports an error, and the numbers look perfectly reasonable)
 
-21. **Playwright 的 `newContext()` 是无痕上下文，只有内存缓存、没有磁盘缓存。**
-    那几个 20–30 MB 的 `sdk-all.js` 大过内存缓存肯放的尺寸，于是一条都存不住，
-    **量出来的暖载与冷载分毫不差**——而那正好长得像「长缓存没配上」这个真缺陷。
-    要量暖载就得 `launchPersistentContext` 加一个空的档案目录。
-22. **`request.sizes().responseBodySize` 命中缓存时照样回文件本身的大小。**
-    要网线上的字节得走 CDP 的 `Network.loadingFinished.encodedDataLength`。
+21. **Playwright's `newContext()` is an incognito context with only a memory cache and no disk cache.**
+    The 20–30 MB `sdk-all.js` files are larger than the memory cache is willing to keep, so none of them get cached,
+    and **warm and cold load measure exactly the same**, which looks exactly like the real bug "long-term caching is not configured".
+    To measure warm load, use `launchPersistentContext` with an empty profile directory.
+22. **`request.sizes().responseBodySize` returns the size of the file itself even on a cache hit.**
+    For the bytes on the wire, use CDP's `Network.loadingFinished.encodedDataLength`.
 
-**改页面样式**（三条都不报错）
+**Changing page styles** (none of these report an error)
 
-23. **`.onlyoffice-container` 有三样不能碰**：类名（组件与全部自动实测都按它找编辑器）、
-    编辑器 iframe 必须是它的**直接子节点**（里面不许再套包装元素）、
-    它必须是定位过的（法律声明入口是绝对定位挂在它上面的，容器要是 `static`，
-    那个入口会跑到页面别处去，就不「显著可见」了）。
-24. **想在编辑器那块地方上盖东西（空状态、遮罩），要挂成 `.onlyoffice-container` 的
-    兄弟，不能挂成它的孩子。** 组件会把容器里那个 div 换掉、把 iframe 直接插进容器；
-    React 在同一个父节点里按条件挂/摘一个兄弟节点时，commit 期那次 `insertBefore`
-    会崩掉整棵树——**不走 onError，类型与单测全绿**，只在编辑器重建的时候显形。
-25. **别用 `height: calc(100% - 顶栏高度)`，整页走 flex。** 写死的那个数在顶栏一改高度
-    之后就对不上了，而**对不上不报错**：编辑器要么被挤出视口下方、要么下面空一条，
-    看着像编辑器自己没铺满。`.onlyoffice-container` 上的 `min-height: 0` 也不能省
-    ——flex 子项默认不肯缩到内容以下。
-26. **判「那个法律声明入口还看得见吗」不能只量宽高。** 一个被别的东西整个盖住的元素，
-    `getBoundingClientRect()` 照样回一个正的宽高，于是许可要求的「显著可见」
-    会在一次纯样式改动里静默地失效。判据要再问一句 `document.elementFromPoint`：
-    它中心那个点上最上面的是不是它自己。B16 里那两条就是这么写的，
-    并且拿一层透明盖板注进去验过会红。
+23. **Three things about `.onlyoffice-container` must not change**: the class name (the component and every automated test find the editor by it);
+    the editor iframe must be its **direct child** (no wrapper elements inside it);
+    and it must be positioned (the legal notice entry is absolutely positioned against it; if the container is `static`,
+    the entry ends up somewhere else on the page and is no longer "prominently visible").
+24. **To place something over the editor area (an empty state, an overlay), mount it as a sibling of `.onlyoffice-container`,
+    not as a child.** The component replaces the div inside the container and inserts the iframe directly into the container;
+    when React conditionally mounts or unmounts a sibling within the same parent, the `insertBefore` call during commit
+    crashes the whole tree. **It does not go through onError, and types and unit tests are all green**; it only shows up when the editor is recreated.
+25. **Do not use `height: calc(100% - header height)`; lay out the whole page with flex.** A hard-coded value stops matching as soon as
+    the header height changes, and **the mismatch reports nothing**: the editor is either pushed below the viewport or leaves an empty strip underneath,
+    which looks as if the editor failed to fill its space. `min-height: 0` on `.onlyoffice-container` is required too:
+    flex items by default refuse to shrink below their content.
+26. **Checking "is the legal notice entry still visible" cannot rely on width and height alone.** An element completely covered by something else
+    still gets a positive width and height from `getBoundingClientRect()`, so the license requirement "prominently visible"
+    can silently stop being met after a purely cosmetic change. The check must also ask `document.elementFromPoint`
+    whether the topmost element at its center point is the entry itself. The two checks in B16 are written this way,
+    and they were confirmed to fail by injecting a transparent overlay.
 
-**打包与发布**（三条都不报错）
+**Packaging and release** (none of these report an error)
 
-27. **装配脚本会递归进自己的输出目录。** `make-release.mjs` 把包写进项目根的
-    `release/`，而它自己又拿排除表去拷源码——漏了 `release` 这一条就一层套一层
-    拷到磁盘满，**深到 `du` 和 `Remove-Item` 都做不完**（要用 robocopy 拿空目录镜像掉）。
-    同一张表也管着 `/legal/source.tar.gz`，漏了的话那个「源码包」里会塞进 1.5 GB。
-    ⚠ 排除表**只有一份**（`demo/server/source-archive.mjs`），装配与源码归档共用——
-    抄成两份的话，两个包会不一样而没人发现。
-28. **`dist/` 比源码旧不会有任何东西说一句。** 装出来的包能跑，只是跑的是上一版前端。
-    `make-release.mjs` 里有一道守卫：源码比 `dist/index.html` 新就当场拒绝装配。
-29. **判据别取管道的退出码。** `grep ... | head` 的退出码是 `head` 的，
-    grep 没找到东西照样回 0——这一轮拿它判「归档里有没有混进 vendor」时踩了一次，
-    差点把「没验」当成「验过了」。要判就把计数取出来自己比。
+27. **The assembly script can recurse into its own output directory.** `make-release.mjs` writes the package into
+    `release/` under the project root, while it copies the source using an exclusion list. If `release` is missing from that list, it copies
+    itself one layer inside another until the disk is full, **so deeply nested that neither `du` nor `Remove-Item` can finish** (mirror an empty directory over it with robocopy).
+    The same list also governs `/legal/source.tar.gz`; if it is missing there, that "source archive" gets 1.5 GB stuffed into it.
+    ⚠ There is **only one** exclusion list (`demo/server/source-archive.mjs`), shared by assembly and source archiving.
+    With two copies, the two packages could differ without anyone noticing.
+28. **Nothing says a word when `dist/` is older than the source.** The assembled package runs; it just runs the previous front end.
+    `make-release.mjs` has a guard for this: if the source is newer than `dist/index.html`, it refuses to assemble.
+29. **Do not use a pipeline's exit code as the check.** The exit code of `grep ... | head` is that of `head`,
+    so it is 0 even when grep finds nothing. This happened once while checking "did vendor end up in the archive",
+    and nearly counted "not verified" as "verified". Extract the count and compare it yourself.
 
-## 已知的限制
+## Known limitations
 
-- **不支持协作，而且互相覆盖时不报错。** 模拟服务只活在一个标签页里，没有第二个人的入口。
-  两个人打开同一份文档各自保存，后保存的把先保存的整个覆盖掉，两边都显示成功。
-- **不做自动保存。** 保存由人点按钮触发。浏览器崩了或标签页被关，改动全丢。
-- **`Ctrl+S` 被拦掉了**（组件刻意关掉了编辑器自带的保存），按下去没反应也不报错。
+- **No collaboration, and overwrites happen without an error.** The mock server lives in a single tab, and there is no way in for a second person.
+  If two people open the same document and each saves, the later save completely overwrites the earlier one, and both see success.
+- **No autosave.** Saving is triggered by clicking a button. If the browser crashes or the tab is closed, all changes are lost.
+- **`Ctrl+S` is intercepted** (the component deliberately disables the editor's built-in save); pressing it does nothing and reports nothing.
