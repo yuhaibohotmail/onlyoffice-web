@@ -1,104 +1,106 @@
-# 自己编格式转换引擎（x2t）
+# Building the format conversion engine (x2t) ourselves
 
-这个目录答一个问题：**怎么从源码编出浏览器里那个做格式转换的 wasm，而不是从别处拿一份现成的。**
+> English | [中文](README.zh.md)
 
-眼下 `vendor/x2t/` 里放的是 CryptPad 发布的现成产物（`scripts/fetch-x2t.mjs` 取的，校验和已核）。
-**这个目录是用来把它换成我们自己编的那一份的**，理由有两条：一是许可要求我们能给出对应源码
-与构建方式，二是现成那份基于的 core 是 9.3.0.140，而我们自己的文档服务是 9.4.0.129，差一档。
+This directory answers one question: **how to build the wasm that does format conversion in the browser from source, instead of taking a ready-made copy from somewhere else.**
 
-⚠ **本机今天编不了**：要一台 Linux 加 Docker，而本机两样都没有，装它要管理员权限。
-dev 那八台机器是 2 核、1750 MB 内存、17 G 盘，光 openssl 加 boost 就超盘。
-装好之后跑 `./build.sh`，别的什么都不用准备。
+Right now `vendor/x2t/` holds the ready-made build published by CryptPad (fetched by `scripts/fetch-x2t.mjs`, checksum verified).
+**This directory exists to replace it with a copy we build ourselves**, for two reasons: first, the license requires us to be able to provide the corresponding source
+and the build method; second, the ready-made copy is based on core 9.3.0.140, while the version we use is 9.4.0.129: one release apart.
 
-## 一件已经查清的事：上游那份不是黑盒
+⚠ **It cannot be built on this machine today**: it needs Linux plus Docker, this machine has neither, and installing them requires administrator rights.
+The test machines available to us have 2 cores, 1750 MB RAM and a 17 GB disk; openssl plus boost alone exceed the disk.
+Once those are installed, run `./build.sh`; nothing else needs to be prepared.
 
-上游那个组件包里的 `x2t.wasm` 一直被当成「直接提交进仓库、没有对应源码」的东西。**不是。**
-它是 CryptPad 那条公开配方的产物，两条证据：
+## One thing already established: the upstream copy is not a black box
 
-1. 它的 `x2t.js` 里那段启动脚本，与 CryptPad 仓库里的 `pre-js.js` **逐字一致**，连制表符缩进都一样。
-2. 它导出了 `_main1`。这个符号只可能来自 CryptPad 的 `wrap-main.cpp`——那份代码被追加到
-   `X2tConverter/src/main.cpp` 末尾，把 `main` 包成一个可以反复调用的 `main1`。
+The `x2t.wasm` in the upstream component package has always been treated as something "committed straight into the repository, with no corresponding source". **It is not.**
+It is the output of CryptPad's public recipe. Two pieces of evidence:
 
-顺带量出来的：上游那份 9.22 MB，CryptPad 发布的那份 6.49 MB，**同样的功能小 30%**。
-差在上游那趟编译带着 26.5 MB 调试信息而且没开优化（函数个数 146064 对 76474）。
+1. The startup script in its `x2t.js` is **identical character for character** to `pre-js.js` in the CryptPad repository, down to the tab indentation.
+2. It exports `_main1`. That symbol can only come from CryptPad's `wrap-main.cpp`: that code is appended to the end of
+   `X2tConverter/src/main.cpp` and wraps `main` into a `main1` that can be called repeatedly.
 
-从这份 wasm 的调试信息里还能读出它的构建环境：编译器是
-`clang version 21.0.0git`（对应 emsdk 4.0.x），源码树挂在 `/core`，emsdk 在 `/emsdk`
-——正是 CryptPad 那个 Dockerfile 的布局。
+Measured along the way: the upstream copy is 9.22 MB, the one CryptPad publishes is 6.49 MB, **the same functionality at 30% less size**.
+The difference is that the upstream build carried 26.5 MB of debug information and had optimization turned off (146064 functions vs. 76474).
 
-## 配方长什么样
+The debug information in this wasm also reveals its build environment: the compiler is
+`clang version 21.0.0git` (corresponding to emsdk 4.0.x), the source tree is mounted at `/core`, and emsdk at `/emsdk`,
+which is exactly the layout of CryptPad's Dockerfile.
 
-CryptPad 的 `Dockerfile` 有三十来个阶段，一个阶段编一个静态库，最后链成 wasm：
+## What the recipe looks like
 
-- 底座 `ubuntu:22.04` + `emsdk 4.0.11` + qt6（要 qmake）
-- 第三方各自单编：openssl 1.1.1f、boost 1.84、harfbuzz、hyphen、brotli、heif、gumbo、katana
-- core 自己的库：kernel、graphics、UnicodeConverter、各格式的 FormatLib（docx/pptx/xlsx/doc/ppt/xls/odf/rtf/txt）、
-  PdfFile、HtmlFile2、EpubFile、XpsFile、DjVuFile、HwpFile、IWorkFile、DocxRenderer、doctrenderer
-- 最后把 `wrap-main.cpp` 追加进 `X2tConverter/src/main.cpp`，链接时带上
-  `--pre-js pre-js.js`、`-sEXPORTED_RUNTIME_METHODS=ccall,FS`、`-sEXPORTED_FUNCTIONS=_main1`、
+CryptPad's `Dockerfile` has about thirty stages; each stage builds one static library, and at the end they are linked into the wasm:
+
+- Base: `ubuntu:22.04` + `emsdk 4.0.11` + qt6 (for qmake)
+- Third-party libraries, each built separately: openssl 1.1.1f, boost 1.84, harfbuzz, hyphen, brotli, heif, gumbo, katana
+- core's own libraries: kernel, graphics, UnicodeConverter, the FormatLib for each format (docx/pptx/xlsx/doc/ppt/xls/odf/rtf/txt),
+  PdfFile, HtmlFile2, EpubFile, XpsFile, DjVuFile, HwpFile, IWorkFile, DocxRenderer, doctrenderer
+- Finally `wrap-main.cpp` is appended to `X2tConverter/src/main.cpp`, and the link step adds
+  `--pre-js pre-js.js`, `-sEXPORTED_RUNTIME_METHODS=ccall,FS`, `-sEXPORTED_FUNCTIONS=_main1`,
   `-sALLOW_MEMORY_GROWTH`
-- 产物再用 `brotli` 压一遍，得到 `x2t.wasm.br` 与 `x2t.js.br`
+- The output is then compressed with `brotli`, giving `x2t.wasm.br` and `x2t.js.br`
 
-它自带一套对照测试：拿真 Document Server 里那个原生 x2t 当基准，同一批文件两边各转一遍比结果。
+It comes with its own comparison tests: the native x2t inside a real Document Server serves as the baseline, the same batch of files is converted on both sides, and the results are compared.
 
-## 怎么编
+## How to build
 
 ```sh
-./build.sh              # 编当前钉住的版本，产物落 out/
-./build.sh --bump       # 先把 core 升到 config.mjs 里那个 coreVersion 再编
+./build.sh              # build the currently pinned version; output goes to out/
+./build.sh --bump       # first upgrade core to the coreVersion in config.mjs, then build
 ```
 
-`build.sh` 干的事：克隆 CryptPad 那个仓库（如果还没克隆）、可选地把 core 升到我们要的版本、
-跑他们的 `build.sh`、把产物拷进 `vendor/x2t/` 并重写那份 `SOURCE.json`。
+What `build.sh` does: clones the CryptPad repository (if it is not cloned yet), optionally upgrades core to the version we want,
+runs their `build.sh`, and copies the output into `vendor/x2t/`, rewriting the `SOURCE.json` there.
 
-## 升到 9.4.0.129
+## Upgrading to 9.4.0.129
 
-CryptPad 那个仓库里的 `core/` 是 ONLYOFFICE core 的一份**改过的副本**，以 git subtree 的形式存着。
-升级就是：
+The `core/` in the CryptPad repository is a **modified copy** of ONLYOFFICE core, stored as a git subtree.
+Upgrading means:
 
 ```sh
 git subtree pull --prefix core https://github.com/ONLYOFFICE/core.git v9.4.0.129 --squash
 ```
 
-会有冲突，因为他们对 core 动过刀。**这件事的难度已经量过了**（2026-08-30，只用 git，不用 docker）：
+There will be conflicts, because they have made surgical changes to core. **How hard this is has already been measured** (2026-08-30, using only git, no docker):
 
-**CryptPad 对 core 改了 30 个文件，+1574 / −575。** 大头是三块：
-`Common/base.pri` 一个占 473 行改动（qmake 的编译参数）、
-新写的 `doctrenderer_empty.cpp` 827 行（把要 V8 的那半换成空实现——**V8 编不成 wasm**，
-这是整条配方的核心手术）、以及十来个 `.pri` / `.pro` 构建文件。
-真正改到 C++ 逻辑的只有五处：`HtmlFile2/htmlfile2.cpp`、`PPTShape/BinaryReader.{h,cpp}`、
-`X2tConverter/src/lib/html.h`、`pdf_image.h`、`main.cpp`。
+**CryptPad changed 30 files in core, +1574 / −575.** Most of it falls into three parts:
+`Common/base.pri` alone accounts for 473 changed lines (qmake compiler flags);
+the newly written `doctrenderer_empty.cpp`, 827 lines (it replaces the half that needs V8 with an empty implementation; **V8 cannot be compiled to wasm**,
+and this is the key surgery of the whole recipe); and a dozen or so `.pri` / `.pro` build files.
+Only five places actually change C++ logic: `HtmlFile2/htmlfile2.cpp`, `PPTShape/BinaryReader.{h,cpp}`,
+`X2tConverter/src/lib/html.h`, `pdf_image.h`, `main.cpp`.
 
-**再看这 30 个文件从 9.3.0.140 到 9.4.0.129 变了多少**：只有 21 个变过，
-合计 +761 / −283。而且其中十来个的改动是**整齐的 +33 行、0 删除**——
-那是 Ascensio 在 9.4 给全树每个文件统一加的一段 AGPL 许可头，插在第 1 行。
-CryptPad 改的都在文件体内，所以这一类会自动合并，不产生冲突。
+**Next, how much these 30 files changed between 9.3.0.140 and 9.4.0.129**: only 21 of them changed,
++761 / −283 in total. And about ten of those changes are **a uniform +33 lines, 0 deletions**:
+that is the AGPL license header Ascensio added to every file in the tree in 9.4, inserted at line 1.
+CryptPad's changes are all inside the file bodies, so this kind merges automatically without conflicts.
 
-**真正要人看的只有三处**：`HtmlFile2/htmlfile2.cpp`（+275，唯一一处实质重写）、
-`UnicodeConverter.pro`（113）、`Common/base.pri`（除许可头外还多了一段 `core_release` 下的
-`-g0` 与 `-Wl,-s`——**正好是把调试信息去掉那件事，与我们想要的方向一致**）。
+**Only three places really need a human to look at them**: `HtmlFile2/htmlfile2.cpp` (+275, the only substantial rewrite),
+`UnicodeConverter.pro` (113), and `Common/base.pri` (besides the license header, it also gains a block under `core_release` with
+`-g0` and `-Wl,-s`, **which is exactly the removal of debug information, the same direction we want to go**).
 
-结论：**升级是可估的工作量，不是未知数。** 但顺序仍然是先照他们钉住的 9.3.0.140 编一遍、
-确认整条链在我们机器上通，**再**动版本。一上来就升，编不过时分不清是
-「配方在我们机器上不通」还是「9.4 变了什么」。
+Conclusion: **the upgrade is a workload that can be estimated, not an unknown.** But the order is still: first build once at their pinned 9.3.0.140,
+confirm the whole chain works on our build machine, **and only then** change the version. If you upgrade straight away and the build fails, you cannot tell whether
+"the recipe does not work on our build machine" or "something changed in 9.4".
 
-量这两个数用的命令（先把 CryptPad 那个仓库浅克隆到任意位置）：
+The commands used to measure these two numbers (first shallow-clone the CryptPad repository to any location):
 
 ```sh
 git fetch --depth=1 https://github.com/ONLYOFFICE/core.git v9.3.0.140 && git tag -f v930 FETCH_HEAD
 git fetch --depth=1 https://github.com/ONLYOFFICE/core.git v9.4.0.129 && git tag -f v940 FETCH_HEAD
-git diff --stat v930 HEAD:core      # CryptPad 改了什么
-git diff --stat v930 v940 -- <上面那 30 个路径>   # 这些文件在两版之间变了什么
+git diff --stat v930 HEAD:core      # what CryptPad changed
+git diff --stat v930 v940 -- <the 30 paths above>   # what changed in these files between the two versions
 ```
 
-## 编完拿什么判「成了」
+## What counts as "it worked" after a build
 
-**判据取产物本身，不取构建脚本有没有报错。** 三条：
+**Judge by the output itself, not by whether the build script reported an error.** Three checks:
 
-1. `x2t.wasm` 解开之后魔数是 `\0asm`，段结构里有 code / data / export，**没有** `.debug_*`
-   （带调试信息说明优化参数没生效，产物会大三成）
-2. 导出表里有 `main1`——没有它组件根本调不动
-3. 拿 `demo/e2e/` 那套自动实测跑一遍：取件、编辑、插件插公式、存回服务端，
-   判据取导出的 docx 字节。**换引擎最容易坏的就是格式转换，而它坏起来不出声。**
+1. After decompressing `x2t.wasm`, the magic number is `\0asm`, the section structure contains code / data / export, and there are **no** `.debug_*` sections
+   (debug information means the optimization flags did not take effect, and the output will be about 30% larger)
+2. The export table contains `main1`: without it the component cannot drive the engine at all
+3. Run the automated real-world test in `demo/e2e/` once: fetch a document, edit it, insert a formula with the plugin, save it back to the server,
+   judged by the bytes of the exported docx. **When the engine is swapped, format conversion is what breaks most easily, and it breaks silently.**
 
-编完顺手记一下产物的大小与函数个数，与这份文档里那两组数对一下。
+After the build, also note the output size and the number of functions, and compare them with the two sets of numbers in this document.

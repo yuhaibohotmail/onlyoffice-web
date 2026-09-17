@@ -1,76 +1,79 @@
-# 修改说明
+# Modification Notice
 
-本文件是许可要求的一部分，不是可选的文档。
+> English | [中文](NOTICE.zh.md)
 
-ONLYOFFICE 按 GNU Affero 通用公共许可证第 3 版发布，并附有 Ascensio System SIA 补充的五条附加条款
-（原文见 `LICENSE`，从第 662 行起）。**第二条**要求：修改过的版本必须带一份显著的声明，
-写明它已被修改、修改的日期，并清楚指出它基于 Ascensio System SIA 开发的原始 ONLYOFFICE 软件。
-这就是那份声明。
+This file is part of the license requirements, not optional documentation.
+
+ONLYOFFICE is released under the GNU Affero General Public License version 3, with five additional terms added by Ascensio System SIA
+(full text in `LICENSE`, starting at line 662). **Additional term 2** requires that a modified version carry a prominent notice
+stating that it has been modified and the date of modification, and clearly indicating that it is based on the original ONLYOFFICE software developed by Ascensio System SIA.
+This is that notice.
 
 ---
 
-## 一、这是什么
+## 1. What this is
 
-**本项目是一个修改过的版本，不是 Ascensio System SIA 发布的原版。**
+**This project is a modified version, not the original version released by Ascensio System SIA.**
 
-原始软件：**ONLYOFFICE**，由 **Ascensio System SIA** 开发
-（版权所有 © 2009-2026 Ascensio System SIA，网址 <https://www.onlyoffice.com>）。
+Original software: **ONLYOFFICE**, developed by **Ascensio System SIA**
+(Copyright © 2009-2026 Ascensio System SIA, website <https://www.onlyoffice.com>).
 
-本项目名为 `onlyoffice-web`，同样按 **AGPL-3.0** 发布，连同上述五条附加条款一起遵守。
-非代码内容（插图、图标集、文档）按**知识共享 署名-相同方式共享 4.0 国际**许可。
+This project is named `onlyoffice-web`. It is likewise released under **AGPL-3.0** and complies with it together with the five additional terms above.
+Non-code content (illustrations, icon sets, documentation) is licensed under **Creative Commons Attribution-ShareAlike 4.0 International**.
 
-**ONLYOFFICE 是 Ascensio System SIA 的商标。本项目未获得任何商标授权**
-（附加条款第四条）。项目里出现这个名字，只是为了说明本软件基于什么、以及谁是原始开发者。
+**ONLYOFFICE is a trademark of Ascensio System SIA. This project has not been granted any trademark license**
+(additional term 4). The name appears in this project only to state what this software is based on and who the original developer is.
 
-## 二、改了什么，什么时候改的
+## 2. What was changed, and when
 
 ### 2026-08-30
 
-| 改了什么 | 为什么 |
+| What was changed | Why |
 |---|---|
-| **去掉了编辑器左上角的自定义标识** | 上游把它换成了微软 Office 的图标（从一个外部地址取 simple-icons 的 `microsoftoffice.svg`）。那是别家的商标，我们没有任何权利用它；而换掉 ONLYOFFICE 自己的标识属于白标，白标是商业版才有的功能。现在显示的是编辑器自带的 ONLYOFFICE 标识——这也正好满足附加条款第三条里「能认出原始开发者」那一项。顺带去掉一个外部地址依赖。 |
-| **把浏览器内那个假服务发出的授权消息降到最小** | 这套方案没有文档服务器，编辑器启动时等的那条授权消息由浏览器里的一个模拟服务发出。上游把 `advancedApi`、`protectionSupport`、`isAnonymousSupport`、`liveViewerSupport`、`customization` 五个开关都设成开，那几个开关对应的是商业版才有的能力。我们按 AGPL 发布，不该拿一条自己编的消息去解锁付费功能，五个全部关闭。实测不损失任何功能。 |
-| **换掉导出 PDF 用的字体，并修正粗斜装反** | 上游那套字体里装的是真的 Monotype Arial，那不是能随分发包发出去的字体，已换成字宽一致、可自由分发的 Liberation Sans。同时上游那套的粗体与斜体文件是**装反的**（名字叫 `*-Bold.ttf` 的里面是斜体），导致导出的 PDF 粗斜互换而不报错，已修正并加了一条自动核对。 |
-| **静态资源改为从社区版镜像抽取** | 上游那份静态资源抽自 Developer Edition 镜像（商业授权）。我们按 AGPL 发布，只能用社区版。两边的许可声明头逐字一致，代码是同一份，差别在分发条款不在代码。 |
-| **新增界面上的法律声明入口** | 附加条款第三条要求界面里有一个清晰可达、显著可见的入口。**它写在组件里而不是页面里**——组件是给别人引用的，放在页面里的话别人引用时就丢了，而丢了不会有任何东西报错。 |
-| **组件新增一格插件配置并下发给编辑器** | 上游的组件从不往编辑器传插件配置，于是插件拿不到配置。这一格是编辑器给插件下发配置的唯一通道。 |
-| **修正「带可编辑内容的 PDF 被当成普通 PDF 打开」** | OnlyOffice 自己生成的 PDF 表单，原本会丢掉可编辑性且不报错。原因有两层：一是判断这件事的那个请求打到一个不存在的端点上、于是永远回「不是」；二是判断修好之后，文档仍然以原始字节交给编辑器，而那一半要的是转换过的格式。现在由组件自己认一次，结果既用于转换、也告诉编辑器该用哪个编辑界面。 |
-| **组件新增一格 `variant`，可以用查看器打开** | 上游把给编辑器那份配置里的 `type` 一格**写死成 `"desktop"`**（两处），而挑加载哪个应用入口正是由这一格决定的，于是永远只加载完整编辑器 `main`。静态资源里一直躺着一个 `embed`——真正的查看器应用，盘上 0.5 MB 对 94.6 MB。现在开放成一格选项。它与既有的 `readOnly` 正交：只读是编辑器关掉编辑（仍有工具栏与插件面板），查看器是换成另一个应用（没有工具栏也没有插件面板）。 |
+| **Removed the custom logo in the top-left corner of the editor** | Upstream had replaced it with the Microsoft Office icon (fetching simple-icons' `microsoftoffice.svg` from an external address). That is another company's trademark, and we have no right whatsoever to use it; and replacing ONLYOFFICE's own logo is white-labeling, which is a feature available only in the commercial edition. The editor now shows its built-in ONLYOFFICE logo — which also satisfies the "the original developer can be recognized" item in additional term 3. This also removes a dependency on an external address. |
+| **Reduced the license message sent by the fake service in the browser to the minimum** | This setup has no document server; the license message the editor waits for at startup is sent by a simulated service running in the browser. Upstream set all five switches `advancedApi`, `protectionSupport`, `isAnonymousSupport`, `liveViewerSupport`, and `customization` to on; those switches correspond to capabilities available only in the commercial edition. We release under the AGPL and should not use a message we wrote ourselves to unlock paid features, so all five are turned off. Measured: no functionality is lost. |
+| **Replaced the fonts used for PDF export, and fixed swapped bold and italic** | Upstream's font set contained the genuine Monotype Arial, which is not a font that may be shipped with a distribution package; it has been replaced with Liberation Sans, which has the same character widths and is freely redistributable. In addition, the bold and italic files in upstream's set were **swapped** (the file named `*-Bold.ttf` contained italic), so exported PDFs had bold and italic swapped without any error being reported; this has been fixed and an automated check was added. |
+| **Static assets are now extracted from the Community Edition image** | Upstream's static assets were extracted from the Developer Edition image (commercially licensed). We release under the AGPL and may only use the Community Edition. The license headers of the two are identical word for word and the code is the same; the difference lies in the distribution terms, not in the code. |
+| **Added a legal notice entry point to the user interface** | Additional term 3 requires a clearly accessible, prominently visible entry point in the interface. **It is built into the component rather than the page** — the component is meant to be used by others; if it were in the page, it would be lost when others use the component, and nothing would report an error when it is lost. |
+| **The component gained a plugin configuration field and passes it to the editor** | Upstream's component never passed plugin configuration to the editor, so plugins could not receive their configuration. This field is the only channel through which the editor delivers configuration to plugins. |
+| **Fixed "PDFs with editable content are opened as plain PDFs"** | PDF forms generated by OnlyOffice itself used to lose their editability without any error being reported. There were two causes: first, the request that decides this was sent to an endpoint that does not exist, so it always answered "no"; second, once that decision was fixed, the document was still handed to the editor as the original bytes, while that part of the editor needs the converted format. Now the component detects this itself, once, and the result is used both for conversion and to tell the editor which editing interface to use. |
+| **The component gained a `variant` field and can open documents in the viewer** | Upstream **hard-coded the `type` field to `"desktop"`** in the configuration given to the editor (in two places), and this field is exactly what decides which application entry point is loaded, so only the full editor `main` was ever loaded. The static assets had always contained an `embed` — the actual viewer application, 0.5 MB on disk versus 94.6 MB. This is now exposed as an option. It is orthogonal to the existing `readOnly`: read-only means the editor with editing turned off (still with the toolbar and plugin panel); the viewer means switching to a different application (no toolbar and no plugin panel). |
 
 ### 2026-09-17
 
-| 改了什么 | 为什么 |
+| What was changed | Why |
 |---|---|
-| **组件新增一格 `allowDownload`，可以关掉界面上的下载与另存** | 有的使用方要求文档只能看、改，不能从编辑器里下载或另存。设为 `false` 时给编辑器的权限里 `download` 为假，文件菜单里就没有「下载为」和另存面板。难点在于组件自己的导出（存回去之前那一步）走的也是编辑器的 `downloadAs` 命令，而文字、表格、演示、PDF 四个编辑器收到这个命令都先查下载权限、没有就拒绝，所以导出期间把编辑器里的下载权限临时打开、导出完收回。不设这一格时行为与原来完全一样。它只关界面入口：原文件仍要整个下到浏览器里才能打开。 |
+| **The component gained an `allowDownload` field that can disable download and Save As in the user interface** | Some users of the component require that documents can only be viewed and edited, not downloaded or saved as a copy from within the editor. When it is set to `false`, `download` is false in the permissions given to the editor, so the File menu has no "Download as" and no Save As panel. The difficulty is that the component's own export (the step before saving back) also uses the editor's `downloadAs` command, and all four editors — document, spreadsheet, presentation, PDF — check the download permission first when they receive this command and refuse if it is absent; so during export the download permission inside the editor is temporarily enabled, and it is revoked after the export. When this field is not set, behavior is exactly the same as before. It only disables the entry points in the user interface: the original file still has to be downloaded in full into the browser before it can be opened. |
+| **Translated the component documentation into English** | The documentation under `src/docs/` (non-code content, CC BY-SA 4.0) was written in Chinese with Chinese file names. It now has English file names and an English version, which is the default; the original Chinese text is kept next to each one as `*.zh.md`, changed only where links had to follow the new file names. The links in `src/readme.md` and `src/readme.zh.md` were updated to match. |
 
-## 三、对应源码在哪
+## 3. Where the corresponding source code is
 
-**本项目的完整源码在 <https://github.com/yuhaibohotmail/onlyoffice-web>**，
-连同重新构建它所需要的全部脚本。
+**The complete source code of this project is at <https://github.com/yuhaibohotmail/onlyoffice-web>**,
+together with all the scripts needed to rebuild it.
 
-⚠ 许可证第 13 条要的是「**本版本**的完整对应源码」——所以部署一个版本时，
-要让界面上那个「获取源代码」指到**与它对得上的那个标签**，而不是仓库的当前状态。
-指法见 `LegalNoticeOptions.sourceUrl`（纯静态部署）或环境变量 `OOW_SOURCE_URL`（带后端时）。
+⚠ Section 13 of the license requires "the complete Corresponding Source of **this version**" — so when you deploy a version,
+the "Get source code" link in the interface must point to **the tag that matches that version**, not to the current state of the repository.
+For how to set it, see `LegalNoticeOptions.sourceUrl` (plain static deployment) or the environment variable `OOW_SOURCE_URL` (deployment with a backend).
 
-其中**格式转换引擎**（浏览器里那个 WebAssembly 模块）来自
-CryptPad 的 `onlyoffice-x2t-wasm`（<https://github.com/cryptpad/onlyoffice-x2t-wasm>）——
-一份公开的、把 ONLYOFFICE core 用 emscripten 编成 WebAssembly 的配方，同样按 AGPL 发布。
-我们取的是它发布的产物并核对了官方校验和（见 `scripts/fetch-x2t.mjs`），
-自己从源码构建的做法写在 `build/x2t/README.md` 里。
+Within it, the **format conversion engine** (the WebAssembly module in the browser) comes from
+CryptPad's `onlyoffice-x2t-wasm` (<https://github.com/cryptpad/onlyoffice-x2t-wasm>) —
+a public recipe that compiles ONLYOFFICE core to WebAssembly with emscripten, also released under the AGPL.
+We use its released artifacts and verified them against the official checksums (see `scripts/fetch-x2t.mjs`);
+how to build it yourself from source is described in `build/x2t/README.md`.
 
-**上游那个组件包里的同一个模块曾被当成「没有对应源码」的东西，那是不成立的**：
-它的启动脚本与 CryptPad 仓库里的对应文件逐字一致，并且导出了只有 CryptPad 的包装代码
-才会产生的入口符号。
+**The same module in the upstream component package was once treated as something "without corresponding source"; that claim does not hold**:
+its startup script is identical word for word to the corresponding file in the CryptPad repository, and it exports entry symbols that only CryptPad's wrapper code
+produces.
 
-## 四、第三方组件
+## 4. Third-party components
 
-编辑器静态资源自带的第三方声明见 `/legal/3rd-Party.txt`（原样来自社区版镜像）。
+The third-party notices bundled with the editor's static assets are in `/legal/3rd-Party.txt` (taken unchanged from the Community Edition image).
 
-本项目另外用到：
+This project additionally uses:
 
-| 东西 | 许可 | 哪来的 |
+| Item | License | Where it comes from |
 |---|---|---|
-| Liberation Sans（四款） | SIL OFL 1.1 | 社区版镜像的 `core-fonts/liberation/` |
-| Carlito（四款） | SIL OFL 1.1 | 社区版镜像的 `core-fonts/crosextra/` |
-| Droid Sans Fallback | Apache 2.0 | 社区版镜像的 `core-fonts/droid/` |
-| 插件引导脚本 | Apache 2.0 | Ascensio System SIA 官方，见 `plugin/third-party/README.md` |
+| Liberation Sans (four styles) | SIL OFL 1.1 | `core-fonts/liberation/` in the Community Edition image |
+| Carlito (four styles) | SIL OFL 1.1 | `core-fonts/crosextra/` in the Community Edition image |
+| Droid Sans Fallback | Apache 2.0 | `core-fonts/droid/` in the Community Edition image |
+| Plugin bootstrap script | Apache 2.0 | Official, from Ascensio System SIA; see `plugin/third-party/README.md` |

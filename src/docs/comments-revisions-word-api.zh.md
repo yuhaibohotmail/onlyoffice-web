@@ -1,6 +1,8 @@
 # 批注修订与 Word API
 
-[← 字体配置](./字体配置.md) | [概述](./概述.md)
+> [English](comments-revisions-word-api.md) | 中文
+
+[← 字体配置](./fonts.zh.md) | [概述](./overview.zh.md)
 
 `EditorManager` 封装了 Word 文档的批注、修订能力，以及 OnlyOffice iframe 内 SDK 的回调订阅。通过 `OnlyOfficeManager.getEditor()` 获取底层实例。
 

@@ -1,55 +1,57 @@
-# PoC：把 OnlyOffice 那个 wasm 搬到后端跑
+# PoC: running the OnlyOffice wasm on the back end
 
-> **⚠ 这条路已经作废，这份目录留着只是记录。**
+> English | [中文](README.zh.md)
+
+> **⚠ This path has been abandoned; this directory is kept only as a record.**
 >
-> 结论（见下面「答案」那一段）是**渲染那一半挪不过去**，所以这个方向没有继续做。
-> 完整的取舍写在仓库根的 `BACKEND.md` 里。
+> The conclusion (see the "Answer" paragraph below) is that **the rendering half cannot be moved over**, so this direction was not pursued further.
+> The full trade-off is written in `BACKEND.md` at the repository root.
 >
-> **⚠ 下面那些命令今天跑不通**：几个脚本读的是 `fixtures/lesson-plan-zh.docx`，
-> 而那批夹具 2026-08-30 搬进了 `demo/` —— 作废的东西没跟着改。
-> **那不是它坏了，是路径过期了。** 想重跑的话先把那几行的路径改对。
+> **⚠ The commands below do not work today**: several scripts read `fixtures/lesson-plan-zh.docx`,
+> but those fixtures moved into `demo/` on 2026-08-30, and the abandoned code was not updated to match.
+> **That does not mean it is broken; the path is just out of date.** If you want to rerun it, fix the path on those lines first.
 
-**问的是：** 前端那个 wasm 能不能挪到后端去，挪过去之后我们是不是就有了一个简化版的
-OnlyOffice。
+**The question:** can the front-end wasm be moved to the back end, and once it is moved, do we then have a simplified
+OnlyOffice?
 
-**答案：** 能挪，而且**格式转换那一半今天就能用**——那个 wasm 在 Node 里约 190 毫秒起来（含解压到 36 MB），
-一份 3 KB 的 docx 转成编辑器内部格式 23 毫秒。**但「渲染」那一半挪不过去**，
-因为那一半根本不在这个 wasm 里。
+**Answer:** it can be moved, and **the format-conversion half is usable today**: in Node the wasm starts in about 190 ms (including decompressing it to 36 MB),
+and converting a 3 KB docx into the editor's internal format takes 23 ms. **But the "rendering" half cannot be moved**,
+because that half is not in this wasm at all.
 
-下面每一条都有一条命令能自己跑一遍。
+Every point below comes with a command you can run yourself.
 
 ```sh
-node poc/backend-x2t/run.mjs            # 第一问：转换。16 种格式逐个走一遍
-node poc/backend-x2t/probe-render.mjs   # 第二问：排版。走到卡住那一步为止
+node poc/backend-x2t/run.mjs            # Question 1: conversion. Goes through 16 formats one by one
+node poc/backend-x2t/probe-render.mjs   # Question 2: layout. Goes as far as the step where it gets stuck
 ```
 
-前提与整个项目一样：`npm run assets`（抽静态资源）、`npm run x2t`（取引擎）、
-`npm run fonts`，以及 `npm run fixtures:formats`（生成 16 份测试文档）。
+The prerequisites are the same as for the whole project: `npm run assets` (extract the static assets), `npm run x2t` (fetch the engine),
+`npm run fonts`, and `npm run fixtures:formats` (generate the 16 test documents).
 
 ---
 
-## 一、先纠一个前提：那个 wasm 不负责渲染
+## 1. First, correcting a premise: the wasm does not do the rendering
 
-提问里说的是「用 wasm 在前端实现渲染」。**实际不是这么分工的**，而这个分工恰好就是
-整件事的答案，所以先说清楚：
+The question talked about "implementing rendering in the front end with wasm". **That is not how the work is actually divided**, and this division happens to be
+the answer to the whole question, so it comes first:
 
-| 谁 | 干什么 | 是什么 |
+| Who | Does what | What it is |
 |---|---|---|
-| `x2t.wasm` | **格式转换**：docx ↔ 内部格式 ↔ odt/rtf/txt…，以及**把已经排好版的画图指令写成 PDF** | 6.8 MB（brotli 压过，解开 36 MB）的 C++ 编译产物 |
-| `sdkjs` | **排版与渲染**：算出每个字在第几页第几毫米，画到画布上 | 32 MB JavaScript（两个 bundle） |
+| `x2t.wasm` | **Format conversion**: docx ↔ internal format ↔ odt/rtf/txt…, plus **writing already laid-out drawing commands out as a PDF** | 6.8 MB (brotli-compressed; 36 MB decompressed) C++ build output |
+| `sdkjs` | **Layout and rendering**: works out on which page and at which millimetre each character sits, and draws it onto the canvas | 32 MB of JavaScript (two bundles) |
 
-浏览器里导出 PDF 的真实过程是**两段**：sdkjs 先在 JS 里把文档排好版、产出一段二进制的
-画图指令流（代码里叫 `pdf.bin`），再交给 x2t.wasm 写成 PDF 文件。
-组件里那个 `convertEditorBinToPdf` 收 `pdfRendererStream` 参数，就是这一段。
+Exporting a PDF in the browser really happens in **two stages**: sdkjs first lays out the document in JS and produces a binary
+stream of drawing commands (called `pdf.bin` in the code), then hands it to x2t.wasm to be written out as a PDF file.
+The `convertEditorBinToPdf` in the component takes a `pdfRendererStream` parameter; that is this stage.
 
-所以「把 wasm 搬到后端」搬过去的是**第一段的转换 + 第二段的写文件**，
-**中间那段排版没搬过去**——它在 JS 里。
+So "moving the wasm to the back end" moves **the conversion of the first stage + the file writing of the second stage**;
+**the layout in between is not moved**: it lives in JS.
 
 ---
 
-## 二、第一问：转换。**能，而且很快**
+## 2. Question 1: conversion. **Yes, and it is fast**
 
-`node poc/backend-x2t/run.mjs`。全程没有浏览器，没有 Document Server，没有 docker。
+`node poc/backend-x2t/run.mjs`. At no point is there a browser, a Document Server, or docker.
 
 ```
   引擎     vendor\x2t （core 9.3.0.140）
@@ -57,186 +59,190 @@ node poc/backend-x2t/probe-render.mjs   # 第二问：排版。走到卡住那�
   Node     v24.11.0
 ```
 
-| 源格式 | 源字节 | 读进来 | 内部格式 | 用时 | 写回 | 写回字节 | 用时 | 正文字符 | 备注 |
+(The script prints its labels in Chinese: `引擎` = "engine", `解开后` = "decompressed".)
+
+| Source format | Source bytes | Read in | Internal format | Time | Written back | Written-back bytes | Time | Body characters | Notes |
 |---|---:|:--:|---:|---:|:--:|---:|---:|---:|---|
 | doc | 35328 | ✅ | 25576 | 64ms | ✅ docx | 13931 | 35ms | 3353 | |
 | docx | 3071 | ✅ | 1626 | 23ms | ✅ docx | 8858 | 30ms | 135 | |
-| epub | 2153 | ❌ | — | 24ms | ❌ | — | — | 0 | wasm 读不了 |
-| fb2 | 616 | ❌ | 11 | 16ms | ❌ | — | — | 0 | 转出 11 字节的空壳 |
-| html | 1868 | ⏳挂住 | — | — | ❌ | — | — | 0 | wasm 不返回 |
+| epub | 2153 | ❌ | — | 24ms | ❌ | — | — | 0 | the wasm cannot read it |
+| fb2 | 616 | ❌ | 11 | 16ms | ❌ | — | — | 0 | produces an 11-byte empty shell |
+| html | 1868 | ⏳hangs | — | — | ❌ | — | — | 0 | the wasm does not return |
 | odt | 3290 | ✅ | 1688 | 44ms | ✅ docx | 8767 | 30ms | 135 | |
-| **pdf** | 143094 | ✅ | 8940 | 86ms | ✅ docx | 9636 | 38ms | **127** | **PDF 转回可编辑 Word** |
+| **pdf** | 143094 | ✅ | 8940 | 86ms | ✅ docx | 9636 | 38ms | **127** | **PDF converted back to editable Word** |
 | rtf | 1884 | ✅ | 7896 | 44ms | ✅ docx | 10897 | 36ms | 119 | |
 | txt | 321 | ✅ | 2185 | 26ms | ✅ docx | 8728 | 31ms | 135 | |
 | csv | 167 | ✅ | 2379 | 32ms | ✅ xlsx | 7026 | 41ms | 60 | |
 | ods | 3964 | ✅ | 2048 | 71ms | ✅ xlsx | 7062 | 39ms | 24 | |
 | xls | 14336 | ✅ | 5674 | 66ms | ✅ xlsx | 9416 | 43ms | 472 | |
 | xlsx | 4953 | ✅ | 2129 | 40ms | ✅ xlsx | 6638 | 38ms | 48 | |
-| odp | 6409 | ❌ | — | 25ms | ❌ | — | — | 0 | wasm 读不了 |
-| ppt | 8192 | ✅ | 21487 | 67ms | ✅ pptx | 16411 | 40ms | 0 | 夹具里没有文字 |
-| pptx | 34699 | ✅ | 60663 | 56ms | ✅ pptx | 36997 | 46ms | 0 | 夹具本来就是空白页 |
+| odp | 6409 | ❌ | — | 25ms | ❌ | — | — | 0 | the wasm cannot read it |
+| ppt | 8192 | ✅ | 21487 | 67ms | ✅ pptx | 16411 | 40ms | 0 | the fixture contains no text |
+| pptx | 34699 | ✅ | 60663 | 56ms | ✅ pptx | 36997 | 46ms | 0 | the fixture is a blank slide to begin with |
 
-**16 种里 12 种读得进来、写得回去。** 另外四种（epub / fb2 / html / odp）与
-浏览器那边**完全一致**——是这份 wasm 基于的 core 版本旧了一档，不是后端的问题，
-FINDINGS 第十一节量过同一组数（且已知换一份基于更新 core 的 wasm，epub 与 html 就都好了）。
+**12 of the 16 can be read in and written back.** The other four (epub / fb2 / html / odp) behave
+**exactly the same** as on the browser side: the core version this wasm is based on is one release old; it is not a back-end problem.
+FINDINGS section 11 measured the same set of numbers (and it is known that switching to a wasm based on a newer core fixes both epub and html).
 
-另外两条顺带核过的：
+Two more things checked along the way:
 
-- **老式二进制只读不写**：docx → doc / xlsx → xls / pptx → ppt 三条都没有产出（rc=80 / 88）。
-  这是 OnlyOffice 本来的能力边界。
-- **PDF 能转回可编辑的 Word**，中文原样活下来（127 个字符）。这一格是意外收获。
+- **Legacy binary formats are read-only**: none of docx → doc / xlsx → xls / pptx → ppt produced any output (rc=80 / 88).
+  This is a limit of OnlyOffice itself.
+- **PDF can be converted back to editable Word**, with the Chinese text coming through intact (127 characters). This cell was an unexpected bonus.
 
-### 判据取产物，不取退出码
+### Judge by the output, not the exit code
 
-x2t 有一类失败是**退出码 0、什么都不产出**，所以每一格都去认字节：
-Editor.bin 认 DOCY/XLSY/PPTY 魔数**外加 64 字节下限**，OOXML 认 zip 里有没有该有的那一项，
-**并且把正文抠出来数字数**。
+x2t has a class of failure where **the exit code is 0 and nothing is produced**, so every cell checks the actual bytes:
+Editor.bin is checked for the DOCY/XLSY/PPTY magic number **plus a 64-byte minimum**, OOXML is checked for whether the zip contains the entry it should,
+**and the body text is extracted and its characters counted**.
 
-那个下限与那个字数不是凑数的：**fb2 那一格转出来的是 11 字节，魔数完全正确、正文一个字都没有**。
-只认魔数的判据会给它开绿灯，报告上就会写着「16 种里 13 种可用」。
+That minimum and that character count are not there for show: **the fb2 cell produces 11 bytes with a perfectly correct magic number and not a single character of body text**.
+A check that looked only at the magic number would let it pass, and the report would then say "13 of 16 usable".
 
-判据自己也被验过两次（注入缺陷，看它会不会红）：
+The check itself was verified twice (inject a defect and see whether it turns red):
 
-| 注入什么 | 结果 |
+| What was injected | Result |
 |---|---|
-| 去掉 Editor.bin 那 64 字节下限 | fb2 转绿 → 与预期表不符，红。**说明那个下限是真在挡事的** |
-| 把所有产物截断到 40 字节 | 16 行里 12 行红。**说明判据读的是字节不是退出码** |
+| Remove the 64-byte minimum for Editor.bin | fb2 turns green → no longer matches the expected table, red. **This shows the minimum really is catching something** |
+| Truncate every output to 40 bytes | 12 of the 16 rows red. **This shows the check reads bytes, not the exit code** |
 
-两次都按快照—注入—跑—还原—`cmp` 走，还原后逐字节一致。
+Both times followed snapshot → inject → run → restore → `cmp`, and after restoring the files were identical byte for byte.
 
-### 一件做后端服务必须知道的事：坏文档能挂死整个进程
+### One thing you must know when building a back-end service: a bad document can hang the whole process
 
-`html` 那一格**不是失败，是不返回**。`main1` 是一次同步的 wasm 调用，进到里面之后
-**同一个进程里没有任何东西能把它打断**——事件循环轮不上，定时器不触发，Promise 不兑现。
+The `html` cell **is not a failure; it never returns**. `main1` is a synchronous wasm call, and once execution is inside it,
+**nothing in the same process can interrupt it**: the event loop never gets a turn, timers do not fire, Promises do not resolve.
 
-所以 `run.mjs` 是**每一格开一个子进程**跑的，超时就杀。这不是测试脚手架的将就：
-**真做成服务也得这样**，否则一份坏文档就能把整个转换服务挂死，而且看不出是哪一份。
-代价是每次转换要多花约 190 毫秒去解压并加载那 36 MB wasm（一个常驻进程池能把这笔省掉）。
+So `run.mjs` runs **each cell in its own child process** and kills it on timeout. This is not a shortcut in the test scaffolding:
+**a real service has to do the same**, otherwise a single bad document can hang the entire conversion service, and there is no way to tell which document it was.
+The cost is about 190 ms extra per conversion to decompress and load that 36 MB wasm (a persistent process pool could save this).
 
 ---
 
-## 三、第二问：排版。**路是通的，今天差最后一步**
+## 3. Question 2: layout. **The path works; today it is one step short**
 
-既然排版引擎是 JavaScript，而 Node 本身就是 V8——OnlyOffice 自己的 doctrenderer
-无非也是「V8 + 这几个 js 文件」——那就当场试一次，别靠推理。
+Since the layout engine is JavaScript, and Node is itself V8 (OnlyOffice's own doctrenderer
+is essentially just "V8 + these few js files"), we tried it on the spot instead of relying on reasoning.
 
-`node poc/backend-x2t/probe-render.mjs`：
+`node poc/backend-x2t/probe-render.mjs`:
 
 ```
 ✓ xregexp                                4ms
-✓ native.js                              0ms      ← OnlyOffice 自带的无头 DOM 垫片
+✓ native.js                              0ms      ← headless DOM shim that ships with OnlyOffice
 ✓ jquery_native.js                       5ms
 ✓ AllFonts.js                            1ms
 ✓ sdk-all-min.js（API 层）                69ms
 ✓ sdk-all.js（模型与排版层）                355ms   ← 28.9 MB
-✓ libfont/fonts.js                       4ms      ← FreeType 的 wasm
+✓ libfont/fonts.js                       4ms      ← FreeType wasm
 字体引擎起来了吗: 是
 
 ✓ NativeCreateApi                    17ms  → document
-✓ asc_nativeOpenFile                 55ms  → opened      ← Editor.bin 读进了文档模型
+✓ asc_nativeOpenFile                 55ms  → opened      ← Editor.bin loaded into the document model
 ✗ asc_nativeCalculateFile            59ms  Cannot read properties of null (reading 'm_pFaceInfo')
 ```
 
-**立得住的：** 整套编辑器内核在 Node 里加载起来了（约 0.5 秒），OnlyOffice 官方那套无头入口
-（`asc_nativeOpenFile` / `asc_nativeCalculateFile` / `asc_nativeGetPDF`）都在，
-FreeType 的 wasm 也起来了，Editor.bin 读进了文档模型。
+(The script prints its labels in Chinese: `（API 层）` = "(API layer)", `（模型与排版层）` = "(model and layout layer)", `字体引擎起来了吗: 是` = "font engine up: yes".)
 
-**差的：** 排版时给字体建 face 失败——字体文件读得到（`native.GetFontBinary` 已经接上盘），
-但只被要走了一个，说明**把字体装进引擎那一步没接对**。这一段在 doctrenderer 里是 C++ 做的，
-换到 Node 得照浏览器那条路重接一遍。
+**What holds up:** the entire editor core loads in Node (about 0.5 s), OnlyOffice's official headless entry points
+(`asc_nativeOpenFile` / `asc_nativeCalculateFile` / `asc_nativeGetPDF`) are all present,
+the FreeType wasm starts as well, and Editor.bin is loaded into the document model.
 
-**并且，`asc_nativeGetPDF` 照样回了 5 MB 的缓冲区。** 那是空的命令流。
-**在这里「有返回值」不等于「画出来了」**——判据要取页数（`asc_nativePrintPagesCount` 回 0）。
-拿字节长度当成功，就会得到一份 5 MB 的假成功。
+**What is missing:** creating a font face during layout fails. The font files can be read (`native.GetFontBinary` is already wired to the disk),
+but only one of them was requested, which shows that **the step that loads fonts into the engine is not wired up correctly**. In doctrenderer this part is done in C++;
+in Node it has to be rewired following the path the browser takes.
 
-### 一条关键证据：wasm 里有「写 PDF」，没有「排版」
+**Also, `asc_nativeGetPDF` still returned a 5 MB buffer.** That is an empty command stream.
+**Here "it returned something" does not mean "it drew something"**: the check has to use the page count (`asc_nativePrintPagesCount` returns 0).
+Taking the byte length as success gives you a 5 MB false success.
 
-把那 36 MB 解开后直接找字符串：
+### A key piece of evidence: the wasm contains "write PDF" but not "layout"
 
-| 找什么 | 在不在 |
+Decompress those 36 MB and search the strings directly:
+
+| Searched for | Present? |
 |---|---|
-| `CPdfFile` / `PdfWriter`（写 PDF 的那一半） | **在** |
-| `doctrenderer` / `sdk-all` / `AllFonts`（排版那一半） | **都不在** |
+| `CPdfFile` / `PdfWriter` (the PDF-writing half) | **Present** |
+| `doctrenderer` / `sdk-all` / `AllFonts` (the layout half) | **None present** |
 
-所以 rc=80 失败的**不是「写 PDF」，是「排版」**。这也说明 CryptPad 那份 wasm
-是**刻意只编了转换那一半**——不是缺陷，是他们不需要排版。
-
----
-
-## 四、所以「简化版的 OnlyOffice」是什么
-
-分两步看，别当成一件事：
-
-**今天就能拿到的（第一段）：一个纯 Node 的格式转换服务。**
-没有 Document Server、没有 docker、没有浏览器，一个 `node_modules` 都不用装。
-12 种格式互转、PDF 转可编辑 Word、每次几十毫秒。
-DocumentServer 那一摊里的 FileConverter，这就是它的对应物。
-
-**还要一段工作才能拿到的（第二段）：后端出 PDF / 出预览图。**
-路径已经验证是通的，卡在字体装载。做完之后就是完整的
-「docx → 排版 → PDF」，也就是 OnlyOffice 的 doctrenderer 的对应物，
-但跑在 Node 里、不需要那个 C++ 二进制。
-
-**如果只是想要「后端出 PDF」而不在乎怎么来的**，还有第三条路没在这里试：
-用无头浏览器驱动现成的组件。这个仓库已经有 Playwright 和整套 e2e，
-浏览器里的导出 PDF 是**今天就通的**。代价是每次渲染要开一个 Chromium。
-它与第二段是「买还是造」的关系，不是技术可行性问题。
+So what fails with rc=80 **is not "writing the PDF" but "layout"**. It also shows that CryptPad's wasm
+**deliberately compiles only the conversion half**: this is not a defect; they simply do not need layout.
 
 ---
 
-## 五、这里面几个不改就走不动、而报错都指向别处的地方
+## 4. So what is "a simplified OnlyOffice"
 
-留在这儿是因为每一条都花了时间，且**报错都不指向真正的原因**。
+Look at it as two steps, not as one thing:
 
-1. **`x2t.wasm` 是 brotli 压过的**（盘上 6.8 MB，解开 36 MB）。不解就喂给
-   `WebAssembly.instantiate`，报的是「expected magic word 00 61 73 6d」——
-   **那句话指着 wasm 文件，看着像文件坏了**。
+**What is available today (the first stage): a pure-Node format conversion service.**
+No Document Server, no docker, no browser, not a single `node_modules` package to install.
+Conversion among 12 formats, PDF to editable Word, a few tens of milliseconds each time.
+It is the counterpart of the FileConverter in DocumentServer.
 
-2. **Emscripten 胶水里那句 `var Module;`**。在 Node 的模块作用域里它是个局部变量，
-   外面设的 `Module` 传不进去。得把整份胶水包进一个参数名叫 `Module` 的函数里
-   （就是 Emscripten 自己 MODULARIZE 的做法），那句声明才变成无操作。
+**What takes more work to get (the second stage): PDFs / preview images produced on the back end.**
+The path has been verified to work; it is stuck on font loading. Once that is done, you have the complete
+"docx → layout → PDF", that is, the counterpart of OnlyOffice's doctrenderer,
+but running in Node and without that C++ binary.
 
-3. **`sdk-all.js` 与 `sdk-all-min.js` 是互补的两半，不是新旧两版。** 名字骗人：
-   min 那份根本没压缩过。前者装模型与排版层，后者装 API 层。
-   只加载一个都会「成功」，然后在用到对方的东西时报一句不相干的错：
-   少了模型层报 `AscCommon.History` 未定义，少了 API 层报 `lcid_enUS is not defined`。
-   **两句都不会让人想到「另一个文件没加载」。**
-
-4. **`native.js` 把 `setTimeout` / `setInterval` 全换成了空函数**（doctrenderer 里是同步跑的）。
-   Emscripten 的启动收尾要过一次 `setTimeout`，被吃掉之后 wasm 永远初始化不完，
-   而报错是 **`_ASC_FT_Init is not a function`——指着字体引擎**。
-
-5. **`fonts.js` 那份胶水整个包在闭包里**，里面那句
-   `var Module = typeof Module != "undefined" ? Module : {}` 读的是函数内那个还没赋值的
-   `Module`，所以在外面设 `Module.wasmBinary` 无效（试过）。它又硬写着
-   `ENVIRONMENT_IS_WEB = true`、只走 `fetch`，只能给它一个读盘的假 `fetch`。
-
-6. **`native.js` 里那个 `console.error` 引用了一个不存在的变量 `param`**，一调用就
-   `ReferenceError`。是上游的 bug，得把 console 换掉。
-
-7. **`NativeOpenFileData` 最后一句是 `Api = Api.getJsApi()`**，把 `Api` 换成了一个
-   不带 `asc_native*` 的外壳。要留住真 api，得自己分两步调
-   `NativeCreateApi()` + `asc_nativeOpenFile()`。
-
-8. **Emscripten 的 FS 抛的不是 `Error`，是个带 `errno` 的普通对象**，
-   `String()` 出来是 `[object Object]`，**一个字的线索都没有**。
+**If all you want is "PDFs from the back end" and you do not care how they are made**, there is a third path not tried here:
+drive the existing component with a headless browser. This repository already has Playwright and a full e2e suite,
+and PDF export in the browser **works today**. The cost is starting a Chromium for every render.
+Its relationship to the second stage is "buy or build", not a question of technical feasibility.
 
 ---
 
-## 六、目录里有什么
+## 5. Places where nothing works until they are fixed, and the error points somewhere else
 
-| 文件 | 干什么 |
+They are kept here because each one took time, and **none of the errors point to the real cause**.
+
+1. **`x2t.wasm` is brotli-compressed** (6.8 MB on disk, 36 MB decompressed). Feed it to
+   `WebAssembly.instantiate` without decompressing and the error is "expected magic word 00 61 73 6d":
+   **that message points at the wasm file and makes it look corrupt**.
+
+2. **The `var Module;` statement in the Emscripten glue.** In Node's module scope it is a local variable,
+   so a `Module` set from outside does not get in. You have to wrap the whole glue in a function whose parameter is named `Module`
+   (which is exactly what Emscripten's own MODULARIZE does); then that declaration becomes a no-op.
+
+3. **`sdk-all.js` and `sdk-all-min.js` are two complementary halves, not an old and a new version.** The names are misleading:
+   the min one is not minified at all. The former holds the model and layout layer, the latter the API layer.
+   Loading only one of them "succeeds", and then an unrelated error appears as soon as something from the other one is used:
+   without the model layer you get `AscCommon.History` is undefined, without the API layer you get `lcid_enUS is not defined`.
+   **Neither message makes you think "the other file was not loaded".**
+
+4. **`native.js` replaces `setTimeout` / `setInterval` with empty functions** (in doctrenderer everything runs synchronously).
+   Emscripten's startup finishes by going through one `setTimeout`; once that is swallowed, the wasm never finishes initializing,
+   and the error is **`_ASC_FT_Init is not a function`, which points at the font engine**.
+
+5. **The whole `fonts.js` glue is wrapped in a closure**, and the statement inside it,
+   `var Module = typeof Module != "undefined" ? Module : {}`, reads the function's own `Module`, which has not been assigned yet,
+   so setting `Module.wasmBinary` from outside has no effect (tried). It also hard-codes
+   `ENVIRONMENT_IS_WEB = true` and only uses `fetch`, so the only option is to give it a fake `fetch` that reads from disk.
+
+6. **The `console.error` in `native.js` references a variable `param` that does not exist**, so calling it throws
+   `ReferenceError`. This is an upstream bug; the console has to be replaced.
+
+7. **The last statement of `NativeOpenFileData` is `Api = Api.getJsApi()`**, which replaces `Api` with a
+   wrapper that has none of the `asc_native*` methods. To keep the real api, you have to make the two calls yourself:
+   `NativeCreateApi()` + `asc_nativeOpenFile()`.
+
+8. **Emscripten's FS does not throw an `Error`; it throws a plain object with an `errno`**,
+   which `String()` turns into `[object Object]`, **without a single clue**.
+
+---
+
+## 6. What is in this directory
+
+| File | What it does |
 |---|---|
-| `x2t-node.mjs` | 在 Node 里驱动 x2t.wasm。照浏览器那份 `x2t.worker.ts` 改的，刻意保持同一套步骤 |
-| `convert-once.mjs` | 跑一次转换就退出。**单独一个进程是必需的**，理由见头注释 |
-| `run.mjs` | 第一问：16 种格式的矩阵，判据取产物 |
-| `probe-render.mjs` | 第二问：排版那一段走到哪儿了 |
-| `zip.mjs` | 从产物里把正文抠出来数字数。够用就行，不是通用 zip 库 |
+| `x2t-node.mjs` | Drives x2t.wasm in Node. Adapted from the browser's `x2t.worker.ts`, deliberately keeping the same sequence of steps |
+| `convert-once.mjs` | Runs one conversion and exits. **A separate process is required**; the reason is in the header comment |
+| `run.mjs` | Question 1: the 16-format matrix, judged by the output |
+| `probe-render.mjs` | Question 2: how far the layout stage gets |
+| `zip.mjs` | Extracts the body text from outputs to count characters. Just enough for this; not a general-purpose zip library |
 
-**已知的欠账**（PoC 阶段可以，真落地要还）：
+**Known debts** (acceptable for a PoC, to be paid off before real use):
 
-- `x2t-node.mjs` 里那份 PDF 字体清单是**从 `src/onlyoffice-web-comp/const/index.ts` 抄来的第二份**。
-  应当从那一处 import，别留两份——两份会漂，而漂了不报错。
-- `convert()` 里走命令流那条路（`pdfBinBytes`）是照浏览器那份 worker 的
-  `writePdfBin` 写的，**但一次都没有真跑过**——因为产不出命令流。
-  第二段做通之后，它是第一个要验的东西。
+- The PDF font list in `x2t-node.mjs` is **a second copy taken from `src/onlyoffice-web-comp/const/index.ts`**.
+  It should be imported from that one place instead of keeping two copies: two copies drift apart, and the drift raises no error.
+- The command-stream path in `convert()` (`pdfBinBytes`) was written after `writePdfBin` in the browser worker,
+  **but it has never actually been run**, because no command stream can be produced.
+  Once the second stage works, it is the first thing to verify.

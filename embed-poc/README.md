@@ -1,239 +1,241 @@
-# embed-poc —— 把这个组件嵌进别人的页面里
+# embed-poc — embedding this component in someone else's page
 
-一个**自足的**示例：宿主页面用一个 iframe 装下这个编辑器，两边只经 `postMessage` 说话，
-文档从宿主给的地址取、编辑完存回宿主给的地址。
+> English | [中文](README.zh.md)
 
-它同时是六条实测，各答一个「不跑一遍就不知道」的问题（读数见下面「量出来的东西」）。
+A **self-contained** example: a host page holds this editor in an iframe, and the two sides talk only through `postMessage`.
+The document is fetched from an address the host provides and, after editing, saved back to an address the host provides.
+
+It is also six live tests, each answering a question you cannot answer without running it (readings are below under "What was measured").
 
 ```sh
-npm run poc:build     # 构建三个页面 → embed-poc/dist/
-npm run poc:e2e       # 起服务器、跑完七趟、停掉（其中一趟**期望红**）
+npm run poc:build     # build the three pages → embed-poc/dist/
+npm run poc:e2e       # start the servers, run all seven passes, stop (one of the passes is **expected to fail**)
 ```
 
-单独跑：
+Running the parts individually:
 
 ```sh
-npm run poc:plugins                     # 预生成插件登记表（装机时该做的那一步）
-npm run poc:static -- 3042              # 笨静态服务器（替 nginx）
-npm run poc:mock   -- 3043              # mock 后端（替文档服务，另外发宿主页）
-node embed-poc/probe/static-check.mjs   # 然后浏览器打开 http://127.0.0.1:3043/
+npm run poc:plugins                     # pregenerate the plugin registry (the step that belongs at deployment time)
+npm run poc:static -- 3042              # dumb static server (stands in for nginx)
+npm run poc:mock   -- 3043              # mock backend (stands in for the document service; also serves the host page)
+node embed-poc/probe/static-check.mjs   # then open http://127.0.0.1:3043/ in a browser
 ```
 
 ---
 
-## 两条硬约束
+## Two hard constraints
 
-这两条不是风格，是这个 PoC 能证明东西、以及能被别人用的前提。
+These two are not a matter of style; they are the preconditions for this PoC proving anything, and for other people being able to use it.
 
-**① 自足：不依赖这个仓库里任何既有代码，后台服务自带。**
-不复用 `demo/server/`、不改 `demo/App.tsx`、不做成 `demo/` 的第二个入口、不用 `scripts/`。
-只消费两样：**组件本体**（`src/`）与**静态资源**（`vendor/`）。
+**① Self-contained: depends on no existing code in this repository, and brings its own backend services.**
+It does not reuse `demo/server/`, does not modify `demo/App.tsx`, is not a second entry point of `demo/`, and does not use `scripts/`.
+It consumes only two things: **the component itself** (`src/`) and **the static assets** (`vendor/`).
 
-⚠ 这条直接关系到结论成不成立。`demo/server/` **会按请求现编插件登记表**
-（把盘上那份相对地址换成绝对地址）。拿一个会改写登记表的服务器去验
-「纯静态发得出插件面板吗」，验的是它自己。
+⚠ This directly determines whether the conclusions hold. `demo/server/` **generates the plugin registry on the fly for each request**
+(replacing the relative addresses in the on-disk copy with absolute addresses). Using a server that rewrites the registry to check
+"can plain static hosting serve the plugin panel?" only tests that server itself.
 
-**② 不认识任何具体后端。** 契约（`src/protocol.ts`）只说四件中性的事：
-去哪儿取件、存到哪儿去、这是第几版、发请求要带什么头。
-把某家后端的端点或数据形状写进去，这个组件就从「谁都能嵌」变成「只能配那一家」。
+**② Knows no specific backend.** The contract (`src/protocol.ts`) states only four neutral things:
+where to fetch the file, where to save it, which version this is, and which headers to send with requests.
+Write one vendor's backend endpoints or data shapes into it, and this component goes from "anyone can embed it" to "works only with that one vendor".
 
 ---
 
-## 它由什么组成
+## What it consists of
 
 | | |
 |---|---|
-| `src/protocol.ts` | **宿主 ↔ 接入页之间的全部约定**。两边只经这一份说话 |
-| `embed.html` + `src/embed.ts` | **接入页**——住在 iframe 里的那一个，这个 PoC 真正的产出物 |
-| `index.html` + `src/host.ts` | 宿主页，替将来的业务应用。带一个**故意写错**的开关，见下 |
-| `static-check.html` + `src/static-check.ts` | 只开一份空白文档，**零夹具、零 mock**，单独回答第 1 问 |
-| `server/static-server.mjs` | **笨的那一半**，替 nginx。只发文件，**一行改写内容的代码都没有** |
-| `server/mock-host.mjs` | mock 的那一半，替文档后端。另外现造一份最小 docx（自带 zip 写入器） |
-| `server/pregenerate-plugins.mjs` | **装机时该做的那一步**：把插件登记表里的相对地址换成绝对路径 |
-| `plugin/` | 这个 PoC 自己那个最小插件——**它只把收到的 `options` 显示出来**，那是宿主给插件递凭证的唯一通道。图标由 `make-icon.mjs` 现画，不提交二进制 |
-| `probe/*.mjs` | 六条实测 + 一个把它们串起来的 `run.mjs` |
+| `src/protocol.ts` | **The entire agreement between host ↔ embed page**. The two sides talk only through this one file |
+| `embed.html` + `src/embed.ts` | **Embed page** — the one that lives inside the iframe; the actual deliverable of this PoC |
+| `index.html` + `src/host.ts` | Host page, standing in for a future business application. It has a switch that is **deliberately wrong**, see below |
+| `static-check.html` + `src/static-check.ts` | Opens only a blank document, **zero fixtures, zero mocks**; answers question 1 on its own |
+| `server/static-server.mjs` | **The dumb half**, stands in for nginx. It only serves files; **there is not a single line of code that rewrites content** |
+| `server/mock-host.mjs` | The mock half, stands in for the document backend. It also builds a minimal docx on the fly (with its own zip writer) |
+| `server/pregenerate-plugins.mjs` | **The step that belongs at deployment time**: replaces the relative addresses in the plugin registry with absolute paths |
+| `plugin/` | This PoC's own minimal plugin — **it only displays the `options` it receives**, which is the only channel for the host to pass credentials to a plugin. The icon is drawn on the fly by `make-icon.mjs`; no binary is committed |
+| `probe/*.mjs` | Six live tests + a `run.mjs` that chains them together |
 
-**两个后台分成两个进程，不合并。** 它们替的是两个不同的东西（nginx / 文档后端），
-答的是两个不同的问题。合成一个之后，「插件面板出来了」就分不清是静态那半够用、
-还是 mock 那半额外补了什么。**而且分开才有跨源**——那正是真实部署的样子。
+**The two backends are two separate processes, not merged.** They stand in for two different things (nginx / document backend)
+and answer two different questions. Once merged, "the plugin panel appeared" can no longer tell you whether the static half was enough
+or the mock half added something extra. **And only separate processes give you cross-origin** — which is exactly what a real deployment looks like.
 
 ---
 
-## 量出来的东西（2026-09-04）
+## What was measured (2026-09-04)
 
-### 一、纯静态发得出这套东西吗 —— **发得出，但插件登记表必须预生成**
+### 1. Can this be served as plain static files? — **Yes, but the plugin registry must be pregenerated**
 
-盘上那份 `plugins.json` 写的是相对地址（`sdkjs-plugins/{GUID}/config.json`）。
-**编辑器把它们解析到自己那个应用目录下面去**：
+The on-disk `plugins.json` contains relative addresses (`sdkjs-plugins/{GUID}/config.json`).
+**The editor resolves them under its own application directory**:
 
 ```
-/packages/onlyoffice/<版本>/web-apps/apps/documenteditor/main/sdkjs-plugins/{GUID}/config.json  → 404
+/packages/onlyoffice/<version>/web-apps/apps/documenteditor/main/sdkjs-plugins/{GUID}/config.json  → 404
 ```
 
-而文件其实在 `<根>/sdkjs-plugins/{GUID}/config.json`。同一批文件，两档对照：
+while the files actually live at `<root>/sdkjs-plugins/{GUID}/config.json`. The same set of files, two cases compared:
 
-| 登记表 | 文件在不在盘上 | **编辑器取到了几条** |
+| Registry | Files present on disk | **Entries the editor fetched** |
 |---|---|---|
-| 盘上原样（相对地址） | 11/11 在 | **0 / 11** |
-| 装机预生成（绝对路径） | 11/11 在 | **11 / 11** |
+| As on disk (relative addresses) | 11/11 present | **0 / 11** |
+| Pregenerated at deployment time (absolute paths) | 11/11 present | **11 / 11** |
 
-⚠ **这个失败完全不出声**：文档照常打开、照常导出、法律声明入口照常在，
-只有插件面板是空的。控制台里那 11 条 404 是唯一的痕迹。
+⚠ **This failure is completely silent**: the document opens as usual, exports as usual, the legal notice entry point is still there;
+only the plugin panel is empty. The 11 404s in the console are the only trace.
 
-**所以装机时要跑一次 `pregenerate-plugins.mjs`。** 它比 `demo/server/` 那种做法好一点：
-`demo/server/` 按每次请求的 Host 拼**完整地址**（它面对任意 Host，只能如此），
-而装机时我们知道产物挂在哪个路径下，所以只写**以斜杠开头的路径**——
-不含协议、域名、端口，于是**换域名、换端口、http 换 https 都不会失效**。
-⚠ 它仍然含着**挂载前缀**，所以那个脚本收一个 `--prefix`。
+**So `pregenerate-plugins.mjs` must be run once at deployment time.** It is somewhat better than the `demo/server/` approach:
+`demo/server/` builds a **full address** from the Host of each request (it faces arbitrary Hosts, so that is its only option),
+whereas at deployment time we know which path the build output is mounted under, so it writes only **paths starting with a slash** —
+no scheme, domain or port, so **changing the domain, changing the port, or switching http to https does not break it**.
+⚠ It still contains the **mount prefix**, so the script takes a `--prefix`.
 
-> 这一档由 `run.mjs` 的第 ⑦ 趟守着，那一趟**期望红**。它绿了才是出事了。
+> This case is covered by pass ⑦ of `run.mjs`, and that pass is **expected to fail**. If it passes, something has gone wrong.
 
-### 二、接入页那条链 —— 通，11 条断言全过
+### 2. The embed page chain — works, all 11 assertions pass
 
-真键盘敲字 → 导出 → 存回，判据取**服务端那份字节**：
-`1401 → 25172 字节`、版本 `1 → 2`、解开新版之后**里面真有这次敲的记号**、
-**旧版里没有**（反向断言）、种子那句话还在。
+Real keyboard typing → export → save back, with the check based on **the bytes on the server side**:
+`1401 → 25172 bytes`, version `1 → 2`, after unpacking the new version **it really contains the marker typed this time**,
+**the old version does not** (negative assertion), and the seed sentence is still there.
 
-### 三、凭据是每次现要的 —— 是，而且对照组真的会红
+### 3. Credentials are requested fresh each time — yes, and the control group really fails
 
-一次会话里 3 次请求、3 份互不相同的凭据。
-切成「开场拿一份用到底」那一档之后，**存件那一下被 401 拒掉**。
+3 requests in one session, 3 mutually distinct credentials.
+After switching to the "get one at the start and use it throughout" variant, **the save is rejected with 401**.
 
-⚠ 真实世界里对应的坏法是**令牌过期**：编辑一份文档没有时间上限，而令牌有。
-mock 这边把「过期」换成「用过就作废」，坏法一模一样，但一秒就看得见。
-所以接入页的做法是**每次要发请求之前现向宿主要一份**，
-契约里**根本没有放令牌的地方**——写不出「开场收一份留着用」那种错。
+⚠ The real-world counterpart of this failure is **token expiry**: editing a document has no time limit, but tokens do.
+The mock replaces "expired" with "invalidated after one use"; the failure is exactly the same, but visible within one second.
+So the embed page **requests a fresh one from the host right before every request it sends**,
+and the contract **has no place at all to put a token** — you cannot write the "receive one at the start and keep it" mistake.
 
-### 四、导出回落成原文件时会拒绝上传 —— 会，且服务端一个字节没动
+### 4. Upload is refused when export falls back to the original file — yes, and not a single byte changed on the server
 
-把体积上限压到 1 字节，`exportAsBlob()` 回的是**打开时那份原文件**
-（只在返回值里多一格 `isOriginalFileFallback`）。接入页认出来并拒绝上传，
-mock 那边仍是「第 1 版 1401 字节」。
+With the size limit pushed down to 1 byte, `exportAsBlob()` returns **the original file as it was opened**
+(the only difference is one extra field, `isOriginalFileFallback`, in the return value). The embed page recognizes it and refuses to upload;
+the mock still shows "version 1, 1401 bytes".
 
-⚠ 不查那一格的后果是最坏的那一类：服务端存下原样的字节、版本号照样往前走、
-页面上显示「保存成功」，**而用户这次的全部改动没了**。
+⚠ The consequence of not checking that field is of the worst kind: the server stores the unchanged bytes, the version number moves forward as usual,
+the page shows "saved successfully", **and all of the user's changes from this session are lost**.
 
-⚠ 那道闸是在**打开**的时候置上标记的（x2t 转换输入时超限），不是导出时才判。
-所以超限的文档本来就打不开或打不全——这一条实测**不要求编辑器出现**。
+⚠ That gate sets its flag at **open** time (the limit is exceeded when x2t converts the input), not only at export time.
+So a document over the limit could not be opened, or not fully opened, in the first place — this test **does not require the editor to appear**.
 
-### 五、自定义插件那条通道 —— 通，而且能带配置
+### 5. The custom plugin channel — works, and can carry configuration
 
-插件有**两条互不相干的通道**，别混：
+Plugins have **two channels that are unrelated to each other**; do not mix them up:
 
-| | 通道一：静态登记表 | 通道二：编辑器配置 |
+| | Channel 1: static registry | Channel 2: editor configuration |
 |---|---|---|
-| 装的是谁 | 镜像自带那 11 个官方插件 | **我们自己的插件** |
-| 能不能下发配置 | **不能**（没有 `options` 那一格） | **能**——`options` 是宿主给插件递配置的**唯一**通道 |
-| 受不受「纯静态」影响 | **受**（见上面第一节） | **不受**——它根本不经那个静态宿主 |
+| What it installs | The 11 official plugins bundled with the image | **Our own plugins** |
+| Can it deliver configuration | **No** (there is no `options` field) | **Yes** — `options` is the **only** channel for the host to pass configuration to a plugin |
+| Affected by "plain static" | **Yes** (see section 1 above) | **No** — it does not go through that static host at all |
 
-真实部署里，插件访问它自己后端要用的凭证就放在 `options` 里，
-所以**通道二才是接真后端时要紧的那条**。这个 PoC 自带一个最小插件
-（`plugin/`），它只干一件事：把收到的 `options` 显示出来并报给最外层页面。
-实测：宿主放进去的 `{来自:"宿主页", 记号:…}` 原样到达。
+In a real deployment, the credentials a plugin needs to access its own backend go in `options`,
+so **channel 2 is the one that matters when connecting to a real backend**. This PoC includes a minimal plugin
+(`plugin/`) that does only one thing: display the `options` it receives and report them to the outermost page.
+Measured: the `{来自:"宿主页", 记号:…}` that the host put in arrived unchanged.
 
-⚠ **编辑器交给插件的 `Asc.plugin.info.options` 已经把 guid 那一层剥掉了。**
-宿主放的是 `options: { "<guid>": {…} }`，插件读到的直接就是 `{…}`。
-判据第一版按嵌套去取，拿到 `undefined`——**那时前两条断言是绿的，
-看起来像「收到了但内容不对」，其实是判据自己写错了**。
+⚠ **The `Asc.plugin.info.options` that the editor hands to the plugin already has the guid level stripped off.**
+The host puts `options: { "<guid>": {…} }`, and what the plugin reads is `{…}` directly.
+The first version of the check read it as nested and got `undefined` — **at that point the first two assertions were green,
+which looked like "received, but with the wrong content", when in fact the check itself was written wrong**.
 
-⚠ 插件的 **guid 从它自己的 `config.json` 里读，宿主这边不再写一份**。
-两处各写一份的话，改了 guid 而宿主没跟上——插件照样登记得上，
-但 `options` 按 guid 分段，对不上号就是**收不到配置而不报错**。
+⚠ The plugin's **guid is read from its own `config.json`; the host side does not write a second copy**.
+If each side wrote its own copy and the guid were changed without the host following — the plugin would still register,
+but `options` is keyed by guid, so a mismatch means **the configuration is not received and no error is reported**.
 
-⚠ 图标是**必填的**。漏了编辑器内部抛错，外面显示成「使用文档时出错」，看着像文档坏了。
-这里的图标由 `plugin/make-icon.mjs` 现画（32×32 洋红），不提交二进制。
+⚠ The icon is **required**. If it is missing, the editor throws internally, and the outside shows "error while using the document", which looks as if the document is broken.
+The icon here is drawn on the fly by `plugin/make-icon.mjs` (32×32 magenta); no binary is committed.
 
-⚠ **`isInsideMode` 决定的只是长相，不是通道**：`true` 停靠在编辑器左边那条面板里
-（与 `demo/plugin` 一致），`false` 开成一个居中的弹窗。两种形态下 `options` 都照样送到。
-**但选 `false` 会连累别的实测**：弹窗盖住正文，而存件那条实测是按坐标点鼠标再敲键盘的，
-那一点就落到弹窗上、字没进正文——**而那次全部断言里只有「新版里有这次敲的记号」一条红**，
-存件成功、版本往前走、字节也真的变了。判据要是取「保存成功」，那一趟会全绿而什么都没验到。
+⚠ **`isInsideMode` decides only the appearance, not the channel**: `true` docks the plugin in the panel on the left side of the editor
+(same as `demo/plugin`), `false` opens it as a centered modal dialog. In both forms `options` is delivered all the same.
+**But choosing `false` breaks other tests**: the dialog covers the document body, and the save test clicks the mouse at coordinates and then types on the keyboard,
+so the click lands on the dialog and the text does not go into the document body — **and of all the assertions in that run, only "the new version contains the marker typed this time" failed**:
+the save succeeded, the version moved forward, and the bytes really changed. If the check had been "saved successfully", that pass would have been all green while verifying nothing.
 
-### 六、两道来源校验 —— 都在拦
+### 6. Both origin checks — both are blocking
 
-声明只信别处，然后从本页发一条 → 被忽略；
-对照组（声明信本页那个源）→ 被收下。有对照才说明前一条不是恒真。
+Declare trust only in another origin, then send a message from this page → ignored;
+control group (declare trust in this page's own origin) → accepted. Only the control group shows that the first result is not vacuously true.
 
-### 七、法律声明那四条链接真的能到东西 —— 现在能了，而且**这一条是做这个 PoC 的过程中才发现要补的**
+### 7. The four legal notice links really lead somewhere — they do now, and **the need for this was only discovered while building this PoC**
 
-⚠ **纯静态那一档下，那个笨服务器原来一条 `/legal/*` 都不发** —— 也就是说
-四条链接全是 404，**而页面照样打得开、一句错都不报**。
-许可的附加条款第三条要的是「用户拿得到许可信息」，
-而**入口点开之后 404 与没有入口是一回事**。
+⚠ **In the plain static setup, the dumb server originally did not serve a single `/legal/*` path** — meaning
+all four links were 404, **while the page still opened without reporting a single error**.
+Additional term 3 of the license requires that "users can obtain the license information",
+and **an entry point that leads to a 404 when clicked is the same as having no entry point**.
 
-补了两样：
+Two things were added:
 
-- 静态服务器加三条挂载。两份许可原件**就在静态资源树里**
-  （`<根>/LICENSE.txt` 与 `3rd-Party.txt`，nginx 一条 alias 就行），
-  第三份 `NOTICE.md` 在仓库根，**装机时要单独拷进部署目录**。
-- 第四条「获取源代码」不能靠静态文件：它默认指 `<legalRoot>/source`，
-  那要由后端**现打一个源码包**，而纯静态下没有那个进程。
-  所以组件新增了一格 `registerLegalNotice({ sourceUrl })`，接入页在建编辑器之前注册，
-  指向公开仓库。⚠ 真部署时要指**与所部署版本对得上的那个标签**——
-  「仓库里是个更新的版本」不满足许可证第 13 条说的「本版本」。
+- The static server got three more mounts. The two original license files **are already in the static asset tree**
+  (`<root>/LICENSE.txt` and `3rd-Party.txt`; one nginx alias is enough),
+  while the third, `NOTICE.md`, is at the repository root and **must be copied separately into the deployment directory at deployment time**.
+- The fourth, "Get source code", cannot rely on a static file: by default it points to `<legalRoot>/source`,
+  which requires a backend to **build a source archive on the fly**, and in plain static hosting there is no such process.
+  So the component gained a new field, `registerLegalNotice({ sourceUrl })`; the embed page registers it before creating the editor,
+  pointing to the public repository. ⚠ In a real deployment it must point to **the tag that matches the deployed version** —
+  "the repository contains a newer version" does not satisfy "this version" as stated in section 13 of the license.
 
-⚠ **既有那套实测逮不住这件事**：`demo/e2e/run.mjs` 的 B16 只断言那个按钮
-**在、且没被盖住**，从不点开链接。这个仓库里真的因此坏过一次
-（dev 那份 vite 配置漏了 `/legal` 反代，四条全 404，而所有实测都绿）。
+⚠ **The existing tests cannot catch this**: B16 in `demo/e2e/run.mjs` only asserts that the button
+**exists and is not covered**, and never opens the links. This repository really did break once because of this
+(the dev Vite config was missing the `/legal` proxy, all four links were 404, and every test was green).
 
-### 八、关掉下载与另存（2026-09-17 加）—— 能关，保存不受影响
+### 8. Disabling download and Save As (added 2026-09-17) — can be disabled, saving is unaffected
 
-open 命令新增一格 `allowDownload`（不给＝允许，与加之前一样）。设为 `false` 时，
-组件给编辑器的权限里 `download` 为假，文件菜单里没有「下载为」和另存面板。
+The open command gained a new field, `allowDownload` (not given = allowed, the same as before it was added). When set to `false`,
+the component sets `download` to false in the permissions it gives the editor, and the File menu has no "Download as" and no Save As panel.
 
-⚠ **难点是组件自己的导出也走 `downloadAs`**，而四个编辑器收到这个命令时第一件事就是查下载权限，
-没有就拒绝。只把权限关掉，等于把保存也关掉了。所以组件在导出期间把编辑器 `Main` 控制器上的
-`appOptions.canDownload` 临时置真、导出完放回（`editor-manager.ts` 的 `grantDownloadForExport`）。
+⚠ **The difficulty is that the component's own export also goes through `downloadAs`**, and when any of the four editors receives this command, the first thing it does is check the download permission,
+refusing if it is absent. Turning off only the permission would also turn off saving. So during export the component temporarily sets
+`appOptions.canDownload` on the editor's `Main` controller to true and restores it after the export (`grantDownloadForExport` in `editor-manager.ts`).
 
-读数来自 `E:\tmp\onlyoffice-web-poc` 那个宿主（**这里的六条实测没有覆盖这一格**）：
+Readings were measured with a separate host page used for manual testing (not part of this repository); **the automated passes here do not cover this option**:
 
-| 查的是什么 | 结果 |
+| What was checked | Result |
 |---|---|
-| docx / xlsx / pptx 的只读与编辑、OnlyOffice 表单 PDF 与普通 PDF 的只读，打开文件菜单 | 8 项都看不到「下载为」与另存面板，全程 0 次浏览器下载 |
-| 对照组：同样 8 项改回允许 | 8 项都看得到「下载为」——前一行不是恒真 |
-| 关掉下载之后编辑并存回（docx / xlsx / pptx） | 存下的字节里有这次敲的字，版本号往前走 |
-| 探针：只在测试浏览器里拿掉「临时放开」那一句 | 保存 30 秒后导出超时失败，版本号不动——那一句是必需的 |
+| Read-only and edit mode for docx / xlsx / pptx, read-only for OnlyOffice form PDFs and plain PDFs, with the File menu opened | None of the 8 cases show "Download as" or the Save As panel; 0 browser downloads throughout |
+| Control group: the same 8 cases switched back to allowed | All 8 show "Download as" — the previous row is not vacuously true |
+| Editing and saving back with download disabled (docx / xlsx / pptx) | The saved bytes contain the text typed this time; the version number moves forward |
+| Probe: remove only the "temporarily allow" line, in the test browser only | 30 seconds after saving, the export fails with a timeout and the version number does not change — that line is required |
 
-⚠ **它只关界面入口，挡不住有心人**：接入页要把原文件整个取到浏览器里才能打开，开发者工具里照样看得到。
+⚠ **It only removes the entry points in the interface; it does not stop a determined person**: the embed page has to fetch the whole original file into the browser to open it, and it can still be seen in the developer tools.
 
-顺带改了两处，都是这一趟撞出来的：
+Two other changes were made along the way, both found during this work:
 
-- **接入页导出失败时要告诉宿主。** 原来 `exportAsBlob()` 抛出去之后被收消息那里的 `.catch(() => {})` 吞掉，
-  宿主一个字都收不到，一直停在「正在保存」。现在发一条 `failed`（`stage: "export"`）。上面那条探针就是靠它当场报出来的。
-- **笨静态服务器补了 `.htm` 的类型。** 少了它，打开编辑器的「文件」菜单时浏览器会下载一个 `ProgramInterface.htm`
-  （编辑器在后台加载的帮助页，回成 `application/octet-stream` 就被当成了文件）。nginx 默认的类型表里 htm 本来就是 text/html。
-  `demo/server/` 那份类型表缺的是同一行，一并补了。
-  ⚠ **补上之后，以前打开过的浏览器还会接着下载**：那棵树回的是一年期 immutable 长缓存，错的那份连同类型已经存进浏览器缓存，
-  之后不再来问服务器（实测：改对之后同一个浏览器档案照样下载，请求到不了服务器；全新档案不下载）。要在那台浏览器里清一次缓存。
-
----
-
-## 搭这个 PoC 的过程中发现的三件事
-
-**一、宿主够不到 iframe 里的东西，所以协议里必须有一条「存一下」的命令。**
-第一版的宿主是这么写的：`iframe.contentWindow.__embed.save()`。
-接入页与宿主**几乎一定不同源**（接入页要与那一大堆静态资源同源，而宿主是业务应用），
-跨源读属性拿到的是 `undefined`，而 `undefined?.save?.()` 是合法的
-——于是**点保存什么都不发生，一个错都不报**。
-
-**二、判据按「次数」算会得出没法解释的数。**
-「编辑器把登记表里每一条都取到了」第一版是按请求次数比的，结果是 `12/11`
-——编辑器对同一条配置会取不止一次。按**集合**算才是在问那个问题。
-
-**三、静态服务器不发跨源头的话，插件会静默地不下发。**
-宿主在一个源、插件配置在另一个源，宿主要 `fetch` 那份 config.json 去读 guid。
-没有 `access-control-allow-origin` 时那次 fetch 直接 `TypeError: Failed to fetch`，
-宿主把它记进日志然后跳过插件——**页面上什么都不少，只是没有插件**。
-所以那个笨服务器上加了这一个响应头（**是头，不是改写内容**，nginx 也常这么配）。
-⚠ 生产上单域名部署时用不着它，那时两边同源。
+- **The embed page must tell the host when export fails.** Previously, when `exportAsBlob()` threw, the error was swallowed by the `.catch(() => {})` in the message handler;
+  the host received nothing at all and stayed at "saving" forever. Now it sends a `failed` message (`stage: "export"`). The probe above reported the failure on the spot because of this.
+- **The dumb static server gained a type for `.htm`.** Without it, opening the editor's "File" menu makes the browser download a `ProgramInterface.htm`
+  (a help page the editor loads in the background; served as `application/octet-stream`, it was treated as a file). In nginx's default type table, htm is already text/html.
+  The type table in `demo/server/` was missing the same line, and it was added there too.
+  ⚠ **After the fix, browsers that opened the page before will keep downloading**: that tree is served with a one-year immutable cache, so the wrong response, together with its type, is already stored in the browser cache,
+  and the browser no longer asks the server (measured: after the fix, the same browser profile still downloaded, and the request never reached the server; a fresh profile did not download). Clear the cache once in that browser.
 
 ---
 
-## 已知的限制
+## Three things discovered while building this PoC
 
-- **不支持多人同时编辑。** 两个人各自保存，后保存的把先保存的整个盖掉。
-  契约里那格 `baseVersion` 是给后端一个机会在覆盖之前说一句话，
-  **它是缓解不是修复**：第二个人除非先导出，否则仍然丢掉自己的工作。
-- **不做自动保存。** 保存由人点按钮触发。
-- 这里的 mock 后端**只是替身**，它对凭据的判断（用过就作废）是为了让实测有判据，
-  不是任何真实后端该有的行为。
+**1. The host cannot reach anything inside the iframe, so the protocol must have a "save now" command.**
+The first version of the host was written like this: `iframe.contentWindow.__embed.save()`.
+The embed page and the host are **almost certainly on different origins** (the embed page has to be same-origin with that large set of static assets, while the host is the business application);
+reading a property across origins gives `undefined`, and `undefined?.save?.()` is valid
+— so **clicking save does nothing and reports no error at all**.
+
+**2. Checks that count "number of times" produce numbers that cannot be explained.**
+"The editor fetched every entry in the registry" was first compared by number of requests, and the result was `12/11`
+— the editor fetches the same config entry more than once. Counting by **set** is what actually asks that question.
+
+**3. If the static server does not send the cross-origin header, plugins are silently not delivered.**
+The host is on one origin and the plugin config on another; the host has to `fetch` that config.json to read the guid.
+Without `access-control-allow-origin`, that fetch fails straight away with `TypeError: Failed to fetch`,
+and the host writes it to the log and skips the plugin — **nothing is missing on the page, there are just no plugins**.
+So this one response header was added to the dumb server (**it is a header, not a content rewrite**; nginx is commonly configured this way too).
+⚠ In production, a same-origin deployment (where another application owns the site root and this project is mounted under a path prefix such as `/oow`) does not need it, because the two sides are then same-origin.
+
+---
+
+## Known limitations
+
+- **Simultaneous editing by several people is not supported.** If two people each save, the later save completely overwrites the earlier one.
+  The `baseVersion` field in the contract gives the backend a chance to say something before overwriting;
+  **it is a mitigation, not a fix**: the second person still loses their own work unless they export first.
+- **No autosave.** Saving is triggered by a person clicking a button.
+- The mock backend here is **only a stand-in**; its credential logic (invalidated after one use) exists so that the tests have something to check,
+  and is not behavior that any real backend should have.

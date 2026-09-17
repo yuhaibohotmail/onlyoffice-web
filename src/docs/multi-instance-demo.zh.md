@@ -1,6 +1,8 @@
 # 多实例示例
 
-[← 单实例示例](./单实例示例.md) | [核心 API →](./核心API.md)
+> [English](multi-instance-demo.md) | 中文
+
+[← 单实例示例](./single-instance-demo.zh.md) | [核心 API →](./core-api.zh.md)
 
 多实例场景使用 **`onlyOfficeManagerFactory`**：每个 Tab 对应唯一 `containerId`，切换 Tab 时**隐藏 DOM 而非销毁实例**，从而保留各编辑器状态。
 

@@ -1,10 +1,12 @@
-# 完整示例
+# Full Examples
 
-[← 事件系统](./事件系统.md) | [API 参考 →](./API参考.md)
+> English | [中文](full-examples.zh.md)
 
-以下示例对齐仓库演示页 `src/features/demo/office-preview-page.tsx`。
+[← Event System](./event-system.md) | [API Reference →](./api-reference.md)
 
-## React 单实例页面
+The following examples align with the repository's demo page `src/features/demo/office-preview-page.tsx`.
+
+## React Single-Instance Page
 
 ```tsx
 "use client";
@@ -151,7 +153,7 @@ export default function EditorPage({
 }
 ```
 
-## 多实例 Tab（`onlyOfficeManagerFactory`）
+## Multi-Instance Tabs (`onlyOfficeManagerFactory`)
 
 ```typescript
 import {
@@ -159,7 +161,7 @@ import {
   FILE_TYPE,
 } from "@/components/onlyoffice-web-comp";
 
-// 按 containerId 打开，切换 Tab 时保留实例（隐藏而非销毁）
+// Open by containerId; keep the instance when switching Tabs (hide rather than destroy)
 await onlyOfficeManagerFactory.open(
   {
     containerId: "tab-editor-abc",
@@ -169,17 +171,17 @@ await onlyOfficeManagerFactory.open(
   { fileName: "New_Document.docx", isNew: true },
 );
 
-// 页面卸载
+// Page unmount
 onlyOfficeManagerFactory.destroyAll();
 ```
 
-完整实现见 `src/features/demo/tabs-multi-page.tsx`。
+For the full implementation, see `src/features/demo/tabs-multi-page.tsx`.
 
-## 何时用底层 API
+## When to Use the Low-Level API
 
-以下场景可直接使用 `EditorManager` / `createEditorView`：
+In the following scenarios you can use `EditorManager` / `createEditorView` directly:
 
-- 需要 `url` + 自定义 `loader` 打开远程文档
-- 批注修订、Word SDK 回调（`subscribe`）
+- Opening a remote document with `url` + a custom `loader`
+- Comments and revisions, Word SDK callbacks (`subscribe`)
 
-一般业务集成优先 `OnlyOfficeManager`，见 [核心 API](./核心API.md)。
+For general business integration, prefer `OnlyOfficeManager`; see [Core API](./core-api.md).

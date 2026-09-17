@@ -1,6 +1,8 @@
 # 字体配置
 
-[← 注意事项与格式](./注意事项与支持格式.md) | [批注修订 →](./批注修订与-Word-API.md)
+> [English](fonts.md) | 中文
+
+[← 注意事项与格式](./notes-and-formats.zh.md) | [批注修订 →](./comments-revisions-word-api.zh.md)
 
 公文、合同等场景常依赖 **仿宋、楷体、方正小标宋** 等系统字体。OnlyOffice 静态 SDK 默认只内置部分字形；要让文档正确显示与导出，需要注册自定义字体。
 

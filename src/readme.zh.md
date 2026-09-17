@@ -4,32 +4,32 @@
 
 基于 OnlyOffice 静态 SDK 的 **Web 端文档编辑组件库**，支持 Word / Excel / PowerPoint 的在线编辑、只读预览、导出与 x2t 格式转换。**无需自建 Document Server**，只需托管 SDK 静态资源。
 
-> 本文档为**入口页**。完整说明见 [`docs/`](./docs/概述.md)。演示站点会直接渲染本目录下的 Markdown，对应路由 `/docs`。
+> 本文档为**入口页**。完整说明见 [`docs/`](./docs/overview.zh.md)。演示站点会直接渲染本目录下的 Markdown，对应路由 `/docs`。
 
 ## 文档导航
 
 | 编号 | 文档 | 说明 |
 |------|------|------|
-| - | [概述](./docs/概述.md) | 文档索引与阅读路径 |
-| - | [快速开始](./docs/快速开始.md) | 初始化、容器挂载、创建编辑器 |
-| - | [核心 API](./docs/核心API.md) | `OnlyOfficeManager`、`EditorManager`、多实例 |
-| - | [事件系统](./docs/事件系统.md) | EventBus、事件类型与监听 |
-| - | [完整示例](./docs/完整示例.md) | React 集成模式 |
-| - | [API 参考](./docs/API参考.md) | 常量、类型定义 |
-| - | [注意事项与支持格式](./docs/注意事项与支持格式.md) | 前置条件、文件格式、常见坑 |
-| - | [批注修订与 Word API](./docs/批注修订与-Word-API.md) | 批注、修订、SDK 回调 |
-| - | [字体配置](./docs/字体配置.md) | `__custom_font_registry__`、catalog 转换 |
-| - | [单实例示例](./docs/单实例示例.md) | 单编辑器 Demo 与源码说明 |
-| - | [多实例示例](./docs/多实例示例.md) | Tab 多实例完整源码 |
+| - | [概述](./docs/overview.zh.md) | 文档索引与阅读路径 |
+| - | [快速开始](./docs/getting-started.zh.md) | 初始化、容器挂载、创建编辑器 |
+| - | [核心 API](./docs/core-api.zh.md) | `OnlyOfficeManager`、`EditorManager`、多实例 |
+| - | [事件系统](./docs/event-system.zh.md) | EventBus、事件类型与监听 |
+| - | [完整示例](./docs/full-examples.zh.md) | React 集成模式 |
+| - | [API 参考](./docs/api-reference.zh.md) | 常量、类型定义 |
+| - | [注意事项与支持格式](./docs/notes-and-formats.zh.md) | 前置条件、文件格式、常见坑 |
+| - | [批注修订与 Word API](./docs/comments-revisions-word-api.zh.md) | 批注、修订、SDK 回调 |
+| - | [字体配置](./docs/fonts.zh.md) | `__custom_font_registry__`、catalog 转换 |
+| - | [单实例示例](./docs/single-instance-demo.zh.md) | 单编辑器 Demo 与源码说明 |
+| - | [多实例示例](./docs/multi-instance-demo.zh.md) | Tab 多实例完整源码 |
 
 **推荐阅读路径**
 
 | 场景 | 路径 |
 |------|------|
-| 首次接入 | [快速开始](./docs/快速开始.md) → [核心 API](./docs/核心API.md) |
-| 在线体验 | [单实例示例](./docs/单实例示例.md) · [多实例示例](./docs/多实例示例.md) |
-| React 页面集成 | [完整示例](./docs/完整示例.md) |
-| 多实例 / 导出 | [核心 API](./docs/核心API.md) · [事件系统](./docs/事件系统.md) |
+| 首次接入 | [快速开始](./docs/getting-started.zh.md) → [核心 API](./docs/core-api.zh.md) |
+| 在线体验 | [单实例示例](./docs/single-instance-demo.zh.md) · [多实例示例](./docs/multi-instance-demo.zh.md) |
+| React 页面集成 | [完整示例](./docs/full-examples.zh.md) |
+| 多实例 / 导出 | [核心 API](./docs/core-api.zh.md) · [事件系统](./docs/event-system.zh.md) |
 
 ## 目录结构
 
@@ -70,7 +70,7 @@ await OnlyOfficeManager.createWithFile({
 }, file);
 ```
 
-更多用法（事件、导出、多实例、主题、语言、只读切换）见 [docs/核心API.md](./docs/核心API.md)。
+更多用法（事件、导出、多实例、主题、语言、只读切换）见 [docs/core-api.zh.md](./docs/core-api.zh.md)。
 
 ## 本仓库中的演示
 
@@ -79,8 +79,8 @@ await OnlyOfficeManager.createWithFile({
 | 路由 | 说明 |
 |------|------|
 | `/docs` | 渲染本目录全部文档 |
-| `/docs/demos?tab=single` | 单实例在线示例（[单实例示例](./docs/单实例示例.md)） |
-| `/docs/demos?tab=multi` | 多实例 Tab 示例（[多实例示例](./docs/多实例示例.md)） |
+| `/docs/demos?tab=single` | 单实例在线示例（[单实例示例](./docs/single-instance-demo.zh.md)） |
+| `/docs/demos?tab=multi` | 多实例 Tab 示例（[多实例示例](./docs/multi-instance-demo.zh.md)） |
 
 演示组件：`src/features/demo/`（`office-preview-page.tsx`、`tabs-multi-page.tsx`）
 
@@ -88,5 +88,5 @@ await OnlyOfficeManager.createWithFile({
 
 ## 相关链接
 
-- [项目根 README（仓库总览）](../../../README.zh.md)
+- [项目根 README（仓库总览）](../README.zh.md)
 - [OnlyOffice 官方 API](https://api.onlyoffice.com/zh-CN/docs/docs-api/usage-api/config/document/)

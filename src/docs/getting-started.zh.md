@@ -1,6 +1,8 @@
 # 快速开始
 
-[← 概述](./概述.md) | [核心 API →](./核心API.md)
+> [English](getting-started.md) | 中文
+
+[← 概述](./overview.zh.md) | [核心 API →](./core-api.zh.md)
 
 ## 推荐方式：`OnlyOfficeManager`
 
@@ -97,12 +99,12 @@ export function MultiEditorPage() {
 }
 ```
 
-多实例打开文档使用 `onlyOfficeManagerFactory.open()`，见 [核心 API](./核心API.md#多实例管理)。
+多实例打开文档使用 `onlyOfficeManagerFactory.open()`，见 [核心 API](./core-api.zh.md#多实例管理)。
 
 **注意**：多实例下必须用 `data-onlyoffice-container-id` 精确定位容器，避免图片上传等操作路由到错误实例。
 
 ## 底层方式（高级）
 
-需要直接控制 `EditorManager` 时，可使用 `createEditorView` 或 `editorManagerFactory`。详见 [核心 API](./核心API.md#底层能力)。
+需要直接控制 `EditorManager` 时，可使用 `createEditorView` 或 `editorManagerFactory`。详见 [核心 API](./core-api.zh.md#底层能力)。
 
 `EditorManager.create()` 同样会在内部调用 `initializeOnlyOffice()`，一般不必提前手动初始化。仅在使用 `OnlyOfficeManager.fromEditor()` 自行绑定时，需确保 SDK 已加载。

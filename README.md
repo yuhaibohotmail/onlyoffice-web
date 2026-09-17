@@ -1,5 +1,7 @@
 # onlyoffice-web
 
+> English | [中文](README.zh.md)
+
 **A browser-only ONLYOFFICE front-end component, built from the Community Edition and maintained by us.**
 
 No Document Server is needed: the editors run in the browser, the collaboration protocol is answered
@@ -12,6 +14,8 @@ and does not connect to any external service.
 This project is **released under AGPL-3.0** and complies with the five additional terms added by Ascensio System SIA.
 It is a **modified version** of ONLYOFFICE, originally developed by Ascensio System SIA.
 What was changed and when is recorded in [NOTICE.md](NOTICE.md). That file is part of the license obligations, not optional documentation.
+
+Documentation in this repository is written in English. Some documents also have a Chinese copy next to them (`*.zh.md`); the copies are optional, and when the two differ, the English version is the one to follow.
 
 ## Two rules we do not break
 
@@ -84,7 +88,7 @@ and **`vendor/`** (the editors, the conversion engine and fonts, ~1.5 GB).
 `vendor/` is **not in git**, and `npm run assets`, which fetches it, needs ssh access to a host running the Community Edition image.
 That command cannot run on the target machine, so vendor has to travel with the release package. This is what `npm run release` does.
 
-The package contains **the full source tree + `dist/` + `vendor/` + a deployment guide (`部署说明.md`)**,
+The package contains **the full source tree + `dist/` + `vendor/` + a deployment guide (`DEPLOY.md`)**,
 with the same directory layout as the repository. **The back end has no third-party dependencies** (only `node:` built-ins),
 so the package needs no `node_modules` and the target machine needs no `npm install`.
 
@@ -146,7 +150,7 @@ never at what the UI says.
 | `release/` | The full package built by `npm run release` (includes vendor, ~1.5 GB). **Not in git**, can be regenerated |
 | `vendor/` | Extracted files, **not in git** (~1.5 GB, reproducible). Each set has a `SOURCE.json` next to it recording where it came from |
 | `build/x2t/` | Recipe for building the conversion engine from source. **It cannot be built today**; see its README |
-| `src/` | **The component itself (AGPL-3.0), the only part of this project meant for distribution.** Every place we changed carries a comment marker starting with `【本项目修改` (modified) or `【本项目新增` (added) |
+| `src/` | **The component itself (AGPL-3.0), the only part of this project meant for distribution.** Every place we changed carries a comment marker starting with `【本项目修改` (modified) or `【本项目新增` (added). The component documentation is in `src/docs/` |
 | `src/legal/` | **The legal notice entry in the UI.** It lives in the component rather than the page; see below |
 | `demo/` | **The example half, not distributed**: page + back end + plugin + fixtures + automated tests. Probes stay here |
 | `demo/server/` | Back end: routing + ticket signing and verification + storage and versioning |

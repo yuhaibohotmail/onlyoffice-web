@@ -1,22 +1,24 @@
-# 第三方件：OnlyOffice 插件引导脚本
+# Third-party file: OnlyOffice plugin bootstrap script
 
-`plugins.js` —— **不是本项目写的**。
+> English | [中文](README.zh.md)
 
-- 来源：Ascensio System SIA 官方的插件引导脚本（`pluginBase.js` + `plugins.js` 合并的那一份）
-- 许可：Apache License 2.0（文件头部保留着原始声明）
+`plugins.js`: **not written by this project**.
 
-## 为什么必须有它，而它又不在那 1.06 GB 的 SDK 包里
+- Source: Ascensio System SIA's official plugin bootstrap script (the version that combines `pluginBase.js` + `plugins.js`)
+- License: Apache License 2.0 (the original notice is kept at the top of the file)
 
-每个 OnlyOffice 插件启动时都要它：它负责跟编辑器握手（`postMessage` 一条 `initialize`），
-再接住编辑器发回来的 `plugin_init` 消息、把消息里那段代码 `eval` 掉——
-**`Asc.plugin.executeMethod` 这些 API 是那一步注入的**，不是这个脚本自带的、也不在 SDK 里。
+## Why it is required, yet not in that 1.06 GB SDK package
 
-真实的 Document Server 把它放在 `sdkjs-plugins/` 目录下随插件一起发。
-而本项目伺服的那份静态 SDK **整个 `sdkjs-plugins/` 目录都不在**
-（打包脚本本来会取它，只是没进提交），所以只能另外拿一份。
+Every OnlyOffice plugin needs it at startup: it handles the handshake with the editor (a `postMessage` carrying `initialize`),
+then receives the `plugin_init` message the editor sends back and `eval`s the code in that message.
+**APIs such as `Asc.plugin.executeMethod` are injected in that step**; they are not part of this script, and they are not in the SDK either.
 
-## 为什么不自己重写
+A real Document Server ships it in the `sdkjs-plugins/` directory together with the plugins.
+But the static SDK this project serves **lacks the entire `sdkjs-plugins/` directory**
+(the packaging script would have fetched it; it just never made it into a commit), so a copy had to be obtained separately.
 
-这段握手协议自己写得出来，但**写错了会让失败变得说不清**：面板不出来的时候，
-分不清是「这个纯前端编辑器带不动插件」还是「我们的握手写错了」——
-而前者正是本项目要回答的那个问题。用官方那份，失败就只有一种解释。
+## Why not rewrite it ourselves
+
+This handshake protocol could be written by hand, but **getting it wrong would make failures impossible to explain**: when the panel does not show up,
+you could not tell whether "this front-end-only editor cannot run plugins" or "our handshake is wrong",
+and the former is exactly the question this project is meant to answer. With the official script, a failure has only one explanation.

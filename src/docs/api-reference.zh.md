@@ -1,6 +1,8 @@
 # API 参考
 
-[← 完整示例](./完整示例.md) | [注意事项 →](./注意事项与支持格式.md)
+> [English](api-reference.md) | 中文
+
+[← 完整示例](./full-examples.zh.md) | [注意事项 →](./notes-and-formats.zh.md)
 
 ## 常量
 
@@ -75,7 +77,7 @@ STATIC_RESOURCE.x2t.wasm              // x2t.wasm 路径
 
 ### `__custom_font_registry__`
 
-SDK 侧字体注册表，定义于 `public/packages/onlyoffice/9.4.0-develop/sdkjs/common/AllFonts.js`。键为 catalog 文件 id（如 `"1001"`），值为文档内字体别名数组。完整配置流程见 [字体配置](./字体配置.md)。
+SDK 侧字体注册表，定义于 `public/packages/onlyoffice/9.4.0-develop/sdkjs/common/AllFonts.js`。键为 catalog 文件 id（如 `"1001"`），值为文档内字体别名数组。完整配置流程见 [字体配置](./fonts.zh.md)。
 
 ## 类型定义
 

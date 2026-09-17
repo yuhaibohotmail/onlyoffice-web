@@ -1,6 +1,8 @@
 # 核心 API
 
-[← 快速开始](./快速开始.md) | [事件系统 →](./事件系统.md)
+> [English](core-api.md) | 中文
+
+[← 快速开始](./getting-started.zh.md) | [事件系统 →](./event-system.zh.md)
 
 ## 业务门面
 
@@ -160,7 +162,7 @@ OFFICE_THEME_OPTIONS.map(({ id, label }) => (
 ));
 ```
 
-可用主题常量见 [API 参考 · OFFICE_THEME](./API参考.md#office_theme)。
+可用主题常量见 [API 参考 · OFFICE_THEME](./api-reference.zh.md#office_theme)。
 
 ### 打开文档参数
 
@@ -299,7 +301,7 @@ editorManagerFactory.destroyAll();
 | `updateMedia(key, url)` | 更新媒体文件映射 |
 | `getMedia()` | 获取媒体文件映射 |
 | `destroy()` | 销毁编辑器实例 |
-| `subscribe({ type, fn })` | 订阅 Word SDK 回调，见 [批注修订与 Word API](./批注修订与-Word-API.md) |
+| `subscribe({ type, fn })` | 订阅 Word SDK 回调，见 [批注修订与 Word API](./comments-revisions-word-api.zh.md) |
 
 **`export()` 返回值：**
 

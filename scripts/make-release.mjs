@@ -150,22 +150,24 @@ if (带VENDOR) {
 }
 
 // ── 三、写一份部署说明进去 ──────────────────────────────────────────────────
+// 【2026-09-17】仓库的文档缺省用英文，这份随包走的说明也一样，文件名改成 DEPLOY.md。
 
-const 说明 = `# 部署说明（${包名}）
+const 说明文件 = "DEPLOY.md";
+const 说明 = `# Deployment guide (${包名})
 
-这一份是**装配好的整套**：源码 + 前端产物 \`dist/\` + \`vendor/\`（编辑器本体、
-转换引擎、字体）。后端零第三方依赖，**不需要 npm install**。
+This is the **fully assembled package**: source code + the front-end bundle \`dist/\` + \`vendor/\` (the editors,
+the conversion engine and fonts). The back end has no third-party dependencies, so **no npm install is needed**.
 
-## 跑起来
+## Running it
 
 \`\`\`sh
-export OOW_TOKEN_SECRET=<一串至少 16 位的随机串>   # 不设的话每次重启换一把，旧票全失效
-export OOW_SOURCE_URL=<源码仓库地址>               # 可选，见下面「许可」
-node demo/server/index.mjs                        # 默认 3041
+export OOW_TOKEN_SECRET=<a random string of at least 16 characters>   # if unset, a new one is generated at every restart and all old tickets become invalid
+export OOW_SOURCE_URL=<URL of the source repository>                   # optional, see "License" below
+node demo/server/index.mjs                                            # port 3041 by default
 \`\`\`
 
-前端那一半是 \`dist/\` 下的静态文件，要有一个 web 服务器把它伺服在 \`/\`，
-并且把下面四条转到后端去：
+The front-end half is the static files under \`dist/\`. A web server must serve them at \`/\`
+and forward these four paths to the back end:
 
 \`\`\`
 /api        →  http://127.0.0.1:3041
@@ -174,32 +176,32 @@ node demo/server/index.mjs                        # 默认 3041
 /legal      →  http://127.0.0.1:3041
 \`\`\`
 
-⚠ **必须同源。** 编辑器在一个 iframe 里，插件又在编辑器里再开一个 iframe，
-任何一层跨了源，父页面就什么都读不到——**而症状是「编辑器一直不出来」，
-看着像编辑器坏了，不像被同源策略挡住**。
+⚠ **Everything must be same-origin.** The editor runs in an iframe and plugins open another iframe inside the editor;
+if any layer is cross-origin, the parent page cannot read anything. **The symptom is "the editor never shows up",
+which looks like a broken editor rather than the same-origin policy.**
 
-⚠ 反代要把 \`Host\` 原样传过去（或者设 \`X-Forwarded-Host\` / \`X-Forwarded-Proto\`）。
-后端拿它拼插件登记表里的绝对地址；传错了的话**插件会静悄悄地不出现**，
-而文档照样打开、照样导出，首页上一点看不出来。
+⚠ The reverse proxy must pass \`Host\` through unchanged (or set \`X-Forwarded-Host\` / \`X-Forwarded-Proto\`).
+The back end uses it to build the absolute URLs in the plugin registry; if it is wrong, **plugins silently do not appear**,
+while documents still open and export, and nothing on the first screen shows the problem.
 
-## 许可（不是可选项）
+## License (not optional)
 
-本程序按 AGPL-3.0 发布。**许可证第 13 条要求**：凡通过网络与它交互的用户，
-都必须能免费取得本版本的完整对应源码。这一套已经做好了：
-界面右下角那个入口里有「获取源代码」，指向 \`/legal/source\`，
-由后端拿这个目录现打一个包给人下。
+This program is released under AGPL-3.0. **Section 13 of the license requires** that every user interacting with it
+over a network can obtain the complete corresponding source of this version free of charge. This is already in place:
+the entry at the bottom right of the UI has a "Get source code" link pointing to \`/legal/source\`,
+where the back end builds an archive of this directory on the fly.
 
-**所以这个目录里的源码不能删**——删了那个端点会发出一个残缺的包，
-而它照样回 200。如果你另有代码仓库，设 \`OOW_SOURCE_URL\` 指过去更好。
+**So do not delete the source code in this directory.** Without it, that endpoint serves an incomplete archive,
+and still returns 200. If you have your own code repository, setting \`OOW_SOURCE_URL\` to point at it is better.
 
-## 自证
+## Self-check
 
 \`\`\`sh
 curl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:3041/legal/source
 curl -s http://127.0.0.1:3041/legal/source.tar.gz | tar tz | head -3
 \`\`\`
 `;
-fs.writeFileSync(path.join(出到, "部署说明.md"), 说明);
+fs.writeFileSync(path.join(出到, 说明文件), 说明);
 
 // ── 四、装完自证 ────────────────────────────────────────────────────────────
 
@@ -210,7 +212,7 @@ const 该有的 = [
   "dist/index.html",
   "NOTICE.md",
   "LICENSE",
-  "部署说明.md",
+  说明文件,
   ...(带VENDOR ? ["vendor/onlyoffice/" + SDK_VERSION + "/web-apps/apps/api/documents/api.js", "vendor/x2t/x2t.wasm"] : []),
 ];
 const 没装上的 = 该有的.filter((f) => !fs.existsSync(path.join(出到, f)));
@@ -221,4 +223,4 @@ if (没装上的.length) {
 
 console.log("\n合计 " + 人读(量大小(出到)));
 console.log("✓ 装好了：" + 出到);
-console.log("  跑起来看 " + path.join(出到, "部署说明.md"));
+console.log("  跑起来看 " + path.join(出到, 说明文件));

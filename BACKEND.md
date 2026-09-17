@@ -1,68 +1,70 @@
-# 后端该做什么
+# What the back end should do
 
-对照 OnlyOffice 自己的后端在做什么，定这个项目的后端该接哪些、不接哪些。
+> English | [中文](BACKEND.zh.md)
 
-下面凡是说 OnlyOffice 怎么做的，都是从**跑着的那个社区版容器里量出来的**
-（`onlyoffice/documentserver:9.4.0.1`），不是照文档抄的。
-每条后面括号里是怎么量的。
+This document compares what ONLYOFFICE's own back end does and decides which of those jobs this project's back end should take on and which it should not.
 
-> ## 结论（2026-08-30 用户裁定）
+Every statement below about how ONLYOFFICE does something was **measured in a running Community Edition container**
+(`onlyoffice/documentserver:9.4.0.1`), not copied from the documentation.
+The parentheses after each statement say how it was measured.
+
+> ## Conclusion (decided by the project owner, 2026-08-30)
 >
-> **后端 wasm 那条中间路不做。** 要服务端能力就用标准 DocumentServer，
-> 要零依赖就用现有的浏览器端实现——**中间那条两边都不需要**。
+> **The middle path, running wasm on the back end, will not be built.** If you need server-side capabilities, use the standard DocumentServer;
+> if you need zero dependencies, use the existing in-browser implementation. **Neither side needs the middle path.**
 >
-> 三条依据，都不是推理：
+> Three grounds, none of them based on reasoning alone:
 >
-> 1. **安全动机已经证伪**（第七节）：搬到后端换掉的是容器不是「拿不拿得到」。
-> 2. **C 的剩余收益 DS 全都有，而且没有缺口**：我们这份 wasm 有 epub / fb2 / odp
->    三个格式读不了、html 会挂死；容器里那个原生 x2t 这四样都正常
->    （`fixtures/formats/` 那批 epub / html / odp 就是它转出来的）。
-> 3. **DS 不是备选方案，是已经在跑的东西**：`ops/units/onlyoffice`（9.4.0.1）已落地，
->    dev 三台（`.40` / `.42` / `.43`）都装着 `doc-node`，`doc-server` 的默认文档引擎就是它。
->    而且开销量过：**50 个并发编辑连接只让容器多吃 30 MiB**（每连接 0.29–0.32 MiB），
->    25 人持续打字占那台 2 核机器 3.4% CPU——单元注释里的原话是
->    「先撑不住的是测试台，不是 DS」。
+> 1. **The security motive has been disproved** (section 7): moving to the back end changes the container, not whether the content can be obtained.
+> 2. **DS provides every remaining benefit of C, with no gaps**: our wasm build cannot read three formats (epub / fb2 / odp)
+>    and hangs on html; the native x2t in the container handles all four correctly
+>    (the epub / html / odp files in `fixtures/formats/` were converted by it).
+> 3. **DS is not a fallback option; it is something that already exists**: wherever an ONLYOFFICE Document Server (9.4.0.1)
+>    is already deployed and available, it is a ready-made document engine.
+>    Its overhead has also been measured: **50 concurrent editing connections add only 30 MiB to the container** (0.29–0.32 MiB per connection),
+>    and 25 people typing continuously use 3.4% CPU on a 2-core test machine. In the words of the measurement notes:
+>    "the test rig gives out first, not DS".
 >
-> 所以**第五节那张顺序表整张作废**，第 1 / 2 / 4 / 5 步都别做；
-> 第 3 步（协作会话）走 DS 的话它自己就做了，也不用做。
-> 下面第一到第四节的分块与判据仍然成立，**留着是因为它们是「为什么该这么选」的依据**。
+> Therefore **the whole ordered table in section 5 is void**: do not do steps 1 / 2 / 4 / 5;
+> step 3 (the collaboration session) is done by DS itself if you use DS, so it is not needed either.
+> The split into blocks and the criterion in sections 1 to 4 still hold. **They are kept because they are the grounds for why this is the right choice.**
 >
-> ⚠ **真正该重新问的不是这条，是「那 onlyoffice-web 还为什么存在」**——见第八节。
+> ⚠ **The question that really needs asking again is not this one, but "then why does onlyoffice-web still exist"**. See section 8.
 
 ---
 
-## 一、OnlyOffice 的后端实际在做什么
+## 1. What ONLYOFFICE's back end actually does
 
-它只有**两个进程**，前面一层 nginx：
+It has only **two processes**, with a layer of nginx in front:
 
 ```
-ds:converter     RUNNING          ← C++，格式转换与渲染
-ds:docservice    RUNNING          ← Node.js，协作会话与宿主集成，听 8000
-ds:example       STOPPED          ← 示例宿主，不是产品的一部分
+ds:converter     RUNNING          ← C++, format conversion and rendering
+ds:docservice    RUNNING          ← Node.js, collaboration sessions and host integration, listens on 8000
+ds:example       STOPPED          ← example host, not part of the product
 ds:metrics       STOPPED
 ```
-（`supervisorctl status`；`ss -ltn` 显示容器里只有 80 和 8000 在听）
+(`supervisorctl status`; `ss -ltn` shows that only 80 and 8000 are listening in the container)
 
-这两个进程的活，按**谁需要它**分成三块。这个分法是下面所有结论的依据：
+The work of these two processes splits into three blocks by **who needs it**. This split is the basis of every conclusion below:
 
-| 块 | 谁在做 | 具体是什么 |
+| Block | Who does it | What it is concretely |
 |---|---|---|
-| **A · 宿主集成** | docservice | 从宿主取原文件、存回宿主（`callbackUrl` 回调）、JWT 签发校验、`/command`（forcesave / drop / info）、`/ConvertService.ashx`、权限与版本编排 |
-| **B · 协作会话** | docservice | WebSocket 那套协议：`auth` / `openDocument` / `saveChanges` / `getLock` / `releaseLock` / `isSaveLock` / `unSaveLock` / `rpc`，变更广播、锁归属、存盘时机 |
-| **C · 转换与渲染** | converter | x2t + doctrenderer + 各格式的解析库 |
+| **A · Host integration** | docservice | Fetching the original file from the host and saving it back to the host (the `callbackUrl` callback), JWT signing and verification, `/command` (forcesave / drop / info), `/ConvertService.ashx`, orchestration of permissions and versions |
+| **B · Collaboration session** | docservice | The WebSocket protocol: `auth` / `openDocument` / `saveChanges` / `getLock` / `releaseLock` / `isSaveLock` / `unSaveLock` / `rpc`, broadcasting changes, lock ownership, when to save |
+| **C · Conversion and rendering** | converter | x2t + doctrenderer + the parsing libraries for each format |
 
-C 那块的东西在盘上摊开是这样（`ls FileConverter/bin/`）：
+Laid out on disk, block C looks like this (`ls FileConverter/bin/`):
 
 ```
 x2t                    libdoctrenderer.so     DoctRenderer.config
-AllFonts.js            font_selection.bin     fonts.log        ← 字体索引
+AllFonts.js            font_selection.bin     fonts.log        ← font index
 libPdfFile.so          libDocxRenderer.so     libEpubFile.so
 libFb2File.so          libHtmlFile2.so        libHWPFile.so
 libDjVuFile.so         libXpsFile.so          libIWorkFile.so
 libOFDFile.so          libStarMathConverter.so                 docbuilder
 ```
 
-**`DoctRenderer.config` 值得单独看一眼**，因为它逐字列出了「让 sdkjs 在没有浏览器的地方跑起来」需要哪几个文件：
+**`DoctRenderer.config` deserves a separate look**, because it lists word for word which files are needed to "run sdkjs where there is no browser":
 
 ```xml
 <file>../../../sdkjs/common/Native/native.js</file>
@@ -73,233 +75,231 @@ libOFDFile.so          libStarMathConverter.so                 docbuilder
 <dictionaries>../../../dictionaries</dictionaries>
 ```
 
-**这正是 `poc/backend-x2t/probe-render.mjs` 已经在加载的那几个**——所以那条路不是猜的，
-是照着 OnlyOffice 自己的清单走的。⚠ 但有一处我们走岔了：这里的 `<allfonts>` 指的是
-**`FileConverter/bin/AllFonts.js`**，不是 `sdkjs/common/AllFonts.js`，且它旁边配着一份
-`font_selection.bin`。那是给转换器单独生成的一份字体索引——**PoC 卡住的那一步，答案八成就在这儿**。
+**These are exactly the files that `poc/backend-x2t/probe-render.mjs` already loads**, so that approach was not a guess;
+it follows ONLYOFFICE's own list. ⚠ But we took a wrong turn in one place: the `<allfonts>` here refers to
+**`FileConverter/bin/AllFonts.js`**, not `sdkjs/common/AllFonts.js`, and it comes with a
+`font_selection.bin` next to it. That is a font index generated separately for the converter. **The answer to the step where the PoC got stuck is very likely here.**
 
-### 关于「DocumentServer 很重」这个说法
+### About the claim that "DocumentServer is heavy"
 
-默认配置里它确实要三样外部依赖：PostgreSQL（`localhost:5432`）、RabbitMQ（`amqp://localhost:5672`）、
-Redis（`default.json` 第 150 / 371 / 417 行）。
+In the default configuration it does require three external dependencies: PostgreSQL (`localhost:5432`), RabbitMQ (`amqp://localhost:5672`),
+and Redis (lines 150 / 371 / 417 of `default.json`).
 
-**但这个容器里这三个进程一个都没有**（`ps -eo comm` 只有 nginx / docservice / converter / cron /
-supervisord），`healthcheck` 回 200，日志写着 `embedded converter started`。
+**But none of these three processes exists in this container** (`ps -eo comm` shows only nginx / docservice / converter / cron /
+supervisord), `healthcheck` returns 200, and the log says `embedded converter started`.
 
-⚠ **别据此断定生产也不需要它们**——我只验证了健康检查和取资源，**没有验过多人协作**，
-而那三样正是为多实例共享会话与任务队列存在的。这里记下来只是为了别把「必须先搭三个中间件」
-当成既定前提。
+⚠ **Do not conclude from this that production does not need them either.** I only verified the health check and fetching resources; **multi-user collaboration was not verified**,
+and those three exist precisely for sharing sessions and task queues across multiple instances. This is recorded here only so that "three middleware services must be set up first"
+is not taken as a given.
 
 ---
 
-## 二、我们今天的分工
+## 2. How we divide the work today
 
-同样三块，看看各自落在哪儿：
+The same three blocks, and where each one sits:
 
-| 块 | OnlyOffice 放哪 | 我们今天放哪 | 多少代码 |
+| Block | Where ONLYOFFICE puts it | Where we put it today | How much code |
 |---|---|---|---|
-| A · 宿主集成 | docservice | **`server/` (3041)** | 750 行，零依赖 |
-| B · 协作会话 | docservice | **浏览器标签页里** | `internal/editor/server.ts`，2413 行 |
-| C · 转换渲染 | converter | **浏览器里** | `x2t.wasm`，每个访问者下 6.8 MB、解压成 36 MB |
+| A · Host integration | docservice | **`server/` (3041)** | 750 lines, zero dependencies |
+| B · Collaboration session | docservice | **In the browser tab** | `internal/editor/server.ts`, 2413 lines |
+| C · Conversion and rendering | converter | **In the browser** | `x2t.wasm`, each visitor downloads 6.8 MB, which decompresses to 36 MB |
 
-`server/` 今天提供的是**两样能力，其余端点都为这两样服务**（它自己的头注释）：
+What `server/` provides today is **two capabilities, and every other endpoint serves these two** (its own header comment):
 
-- 取件 `GET /api/internal/download/{docId}/{cacheKey}/{name}?token=`
-- 存件 `POST /api/documents/{docId}/content`
-- 外加：会话令牌签发与校验（`jwt.mjs`，会话 900 秒 / 取件 300 秒）、落盘与版本
-  （`storage.mjs`，**每存一次新写一个版本文件，旧版永不覆盖**）、只读伺服
+- Fetch: `GET /api/internal/download/{docId}/{cacheKey}/{name}?token=`
+- Save: `POST /api/documents/{docId}/content`
+- Plus: session token signing and verification (`jwt.mjs`, 900 seconds for sessions / 300 seconds for fetches), writing to disk and versioning
+  (`storage.mjs`, **every save writes a new version file; old versions are never overwritten**), and read-only serving of
   `/packages/**` `/legal/**` `/plugins/**`
 
-**它的路径名是照 doc-server 的形状取的**（`server/index.mjs` 头注释明说），
-也就是说：**A 那一块在平台里早就有人做了**——`backends/services/doc-server`（6012）
-的 auth / tenant / document / storage / version / editor / audit / webhook 那一整套，
-干的就是 OnlyOffice 眼里「宿主」的活。这里这 750 行是它的一个小仿制品，
-存在的理由是让这个仓库能自己跑起来、自己验证，**不是要变成产品后端**。
+**Its path names were modeled on the API shape of a real document-management back end** (the header comment of `server/index.mjs` says so explicitly).
+In other words, **block A belongs to the document-management back end of whatever application hosts this component, not to this project**.
+The auth / tenant / document / storage / version / editor / audit / webhook set of such a back end
+does exactly the job that ONLYOFFICE calls "the host". These 750 lines are a small imitation of it;
+they exist so that this repository can run and verify itself on its own, **not to become a product back end**.
 
-项目自己也是这么规划的：`NEXT-SESSION-PROMPT.md` 里第三件事就是把 `server/` 挪进
-`demo/`，理由是「组件是唯一要发布的那一份，demo 那些探针不该跟着发出去」。
+The project plans it this way too: the third item in `NEXT-SESSION-PROMPT.md` is moving `server/` into
+`demo/`, on the grounds that "the component is the only thing to be published; the demo's probes should not be shipped with it".
 
 ---
 
-## 三、这个分工今天的代价
+## 3. What this division costs today
 
-不是抽象缺点，是已经写在 README「已知的限制」里的三条，加上 PoC 新量出来的两条：
+These are not abstract drawbacks. They are the three already listed under "Known limitations" in README.md, plus two newly measured by the PoC:
 
-| 现象 | 根在哪 |
+| Symptom | Where the cause is |
 |---|---|
-| **不支持协作，而且互相覆盖时不报错**。两个人各自保存，后存的把先存的整个盖掉，两边都显示成功 | B 在标签页里。一个标签页看不见另一个标签页 |
-| **不自动保存**，浏览器崩了改动全丢 | 同上：没有一个活在服务端的会话 |
-| **`Ctrl+S` 被拦掉了**，按下去没反应也不报错 | 同上 |
-| 每个访问者都要下 6.8 MB wasm 并解压成 36 MB | C 在浏览器里 |
-| **服务端完全不认识文档内容**——收下的是一堆字节。出不了预览图、做不了全文检索、不能批量转换、不能在上传时校验 | C 在浏览器里 |
+| **No collaboration, and overwrites happen without an error.** Two people each save, the later save completely overwrites the earlier one, and both see success | B is in the tab. One tab cannot see another tab |
+| **No autosave**; if the browser crashes, all changes are lost | Same as above: there is no session living on the server |
+| **`Ctrl+S` is intercepted**; pressing it does nothing and reports nothing | Same as above |
+| Every visitor has to download 6.8 MB of wasm and decompress it to 36 MB | C is in the browser |
+| **The server knows nothing about document content**: what it receives is a pile of bytes. It cannot produce preview images, cannot do full-text search, cannot convert in batches, cannot validate on upload | C is in the browser |
 
 ---
 
-## 四、判据：什么该搬到后端
+## 4. The criterion: what should move to the back end
 
-**别照着 OnlyOffice 的模块表抄。** 用一条能自己判的判据：
+**Do not copy ONLYOFFICE's module table.** Use a criterion you can apply yourself:
 
-> **这件事需要一个「所有客户端都同意」的答案吗？**
+> **Does this thing need an answer that "all clients agree on"?**
 
-需要的，必须在服务端；不需要的，在哪儿都行，看代价。
-按这条切，上面 A / B / C 三块的结论完全不同。
+If it does, it must be on the server; if it does not, it can be anywhere, depending on cost.
+Cut along this line, and the three blocks A / B / C come out completely differently.
 
-### 档一 · 必须搬（不搬就是错的，不是慢）
+### Tier 1 · Must move (not moving it is wrong, not just slow)
 
-**只有 B 这一块。** 而且 B 的全部内容就是三个问题的答案要唯一：
+**Only block B.** And the whole of B is that the answers to three questions must be unique:
 
-1. `saveChanges` 的**顺序**——谁的改动排在谁前面
-2. `getLock` 的**归属**——这一段现在归谁改
-3. **基于哪个版本改的**——`storage.mjs` 已经有版本号了，缺的是「这次提交是从哪一版长出来的」
+1. The **order** of `saveChanges`: whose change comes before whose
+2. The **ownership** of `getLock`: who is allowed to edit this section right now
+3. **Which version the edit is based on**: `storage.mjs` already has version numbers; what is missing is "which version this submission grew from"
 
-这三件今天在标签页里，所以「两个人打开同一份文档」这件事**在架构上就不成立**，
-不是没做完，是做不了。
+These three live in the tab today, so "two people open the same document" **cannot work at the architecture level**.
+It is not unfinished; it cannot be done.
 
-### 档二 · ~~该搬~~ **不搬，走 DS**（2026-08-30 改）
+### Tier 2 · ~~Should move~~ **Do not move; use DS** (changed 2026-08-30)
 
-**这一档原本写的是「C 该搬」，已作废，理由见开头那个结论框。** 原文保留在下面，
-因为「搬过去能换来什么」那几条仍然是真的——只是**那几条 DS 也都给，而且没有格式缺口**。
+**This tier originally said "C should move". That is void; the reasons are in the conclusion box at the top.** The original text is kept below,
+because the points about "what moving it would gain" are still true. It is just that **DS provides all of them too, and has no format gaps**.
 
-**C 这一块。PoC 已经证明可行**（`poc/backend-x2t/`）：12 种格式互转，单次几十毫秒，
-纯 Node、零 npm 依赖。搬过去换来四样今天没有的东西：
+**Block C. The PoC has already shown it is feasible** (`poc/backend-x2t/`): conversion between 12 formats, tens of milliseconds per conversion,
+pure Node, zero npm dependencies. Moving it would gain four things we do not have today:
 
-- **上传即转换**，不必等到有人打开它
-- **批量与离线转换**，不占用户的浏览器
-- **客户端不必再下那 36 MB**（首屏、弱网、低配终端）
-- **PDF 转回可编辑 Word**（PoC 实测，中文原样活下来）
+- **Convert on upload**, without waiting for someone to open the file
+- **Batch and offline conversion**, without using the user's browser
+- **Clients no longer download those 36 MB** (first screen, weak networks, low-end devices)
+- **PDF converted back to editable Word** (measured in the PoC; Chinese text survives intact)
 
-⚠ **它不是一条安全收益，别当成一条。** 搬完之后浏览器收到的从 docx 变成 `Editor.bin`，
-**换掉的是容器，不是「拿不拿得到」**——实测见 `poc/backend-x2t/probe-what-browser-gets.mjs`：
-bin 里正文是明文 UTF-16LE（30 行 JS 就读出来了）；原文件里的作者元数据与 `w:vanish`
-隐藏文字**照样跟着过去**；还原成 docx 也不需要另外准备工具，**浏览器自己就带着那份 x2t.wasm**，
-那正是导出按钮在做的事。真 DocumentServer 也是这么发的
-（`urls['Editor.bin'] || urls['origin.' + documentFormat]`，见 `sdk-all-min.js`），
-而且它还留了一条直接发原文件的退路。详见下面第七节。
+⚠ **It is not a security benefit; do not count it as one.** After the move, what the browser receives changes from docx to `Editor.bin`;
+**what changes is the container, not whether the content can be obtained**. See the measurement in `poc/backend-x2t/probe-what-browser-gets.mjs`:
+the body text in the bin is plain UTF-16LE (30 lines of JS read it out); the author metadata and `w:vanish`
+hidden text from the original file **go along with it unchanged**; converting back to docx needs no extra tool either, **because the browser already carries that x2t.wasm**,
+which is exactly what the export button does. The real DocumentServer sends content the same way
+(`urls['Editor.bin'] || urls['origin.' + documentFormat]`, see `sdk-all-min.js`),
+and it even keeps a fallback that sends the original file directly. Details in section 7 below.
 
-⚠ **搬的时候必须带一条纪律**：每次转换关在一个能被杀掉的进程或 worker 里。
-`html` 那一格实测**不是失败，是不返回**——`main1` 是同步 wasm 调用，
-进去之后同进程里没有任何东西打断得了它。一份坏文档就能挂死整个转换服务，
-而且看不出是哪一份。
+⚠ **Moving it must come with one rule**: run each conversion in a process or worker that can be killed.
+The `html` cell was measured **not to fail but to never return**: `main1` is a synchronous wasm call,
+and once inside it, nothing in the same process can interrupt it. A single bad document can hang the entire conversion service,
+and there is no way to tell which document it was.
 
-**服务端出 PDF / 预览图**属于同一块的后半段，路已经验通（编辑器内核在 Node 里起来了、
-文档模型读进去了），卡在字体装载——而上面第一节已经指出 OnlyOffice 把答案摆在哪儿了。
+**Server-side PDF / preview images** are the second half of the same block. The approach has been verified to work (the editor core starts in Node,
+and the document model loads), but it is stuck on loading fonts, and section 1 above already pointed out where ONLYOFFICE keeps the answer.
 
-### 档三 · 不该搬（OnlyOffice 有，我们不需要）
+### Tier 3 · Should not move (ONLYOFFICE has it, we do not need it)
 
-- **PG + RabbitMQ + Redis 那一套**：DS 用它们是为了多实例共享会话与任务队列。
-  我们是单实例、教育场景的并发，先用进程内队列加一张表就够。这一层可以后加，
-  一上来照抄只会得到三个要运维的中间件。
-- **回调式集成**（`callbackUrl` + `/command` + `ConvertService.ashx`）：那套协议是
-  为「我不认识宿主系统」设计的。**我们的宿主就是自己**，直接调用比隔着 HTTP 回调简单一个数量级。
-- **A 那一整块**：doc-server 已经在做，别做第二份。
+- **The PG + RabbitMQ + Redis set**: DS uses them to share sessions and task queues across multiple instances.
+  We are single-instance with low concurrency; an in-process queue plus one table is enough to start with. This layer can be added later;
+  copying it from the start only gets you three middleware services to operate.
+- **Callback-based integration** (`callbackUrl` + `/command` + `ConvertService.ashx`): that protocol was
+  designed for "I do not know the host system". **Our host is ourselves**, so calling directly is an order of magnitude simpler than going through HTTP callbacks.
+- **The whole of block A**: that is the job of the host application's own document-management back end; do not build a second copy here.
 
 ---
 
-## 五、~~建议的顺序~~ **整张作废**（2026-08-30）
+## 5. ~~Suggested order~~ **The whole table is void** (2026-08-30)
 
-原来这里是一张五步表：搬转换 → 上传即转 → 搬协作会话 → 接字体出 PDF → 预览图。
-**五步全部不做**，理由见开头结论框。留个残骸在这儿是为了让下一个人知道
-**这条路被走到过、被否掉了**，而不是没人想过。
+This used to be a five-step table: move conversion → convert on upload → move the collaboration session → hook up fonts and produce PDF → preview images.
+**None of the five steps will be done**; the reasons are in the conclusion box at the top. The remains are left here so that the next person knows
+**this path was followed and rejected**, not that nobody thought of it.
 
-| # | 原计划 | 现在 |
+| # | Original plan | Now |
 |---|---|---|
-| 1 | 把转换搬进 `server/` | 不做。DS 的 `/ConvertService.ashx` 已经是这个，且没有格式缺口 |
-| 2 | 上传即转 `Editor.bin` 落盘 | 不做。DS 自己就这么干（`urls['Editor.bin']`） |
-| 3 | 把协作会话搬出标签页 | 不做。**走 DS 的话这一块就是 DS 本身** |
-| 4 | 接字体，服务端出 PDF | 不做。等于在 Node 里重写 doctrenderer，去复刻一个**已经装在 `doc-node` 上的**二进制 |
-| 5 | 预览图 / 缩略图 | 不做。同上；且那几台上还装着 kkFileView，预览本来就有人做 |
+| 1 | Move conversion into `server/` | Not done. DS's `/ConvertService.ashx` already is this, and has no format gaps |
+| 2 | Convert on upload and write `Editor.bin` to disk | Not done. DS does this itself (`urls['Editor.bin']`) |
+| 3 | Move the collaboration session out of the tab | Not done. **If you use DS, this block is DS itself** |
+| 4 | Hook up fonts, produce PDF on the server | Not done. It amounts to rewriting doctrenderer in Node to replicate a binary **that Document Server already ships** |
+| 5 | Preview images / thumbnails | Not done. Same as above; and a separate preview service (e.g. kkFileView) can already do previews |
 
-**`poc/backend-x2t/` 留着**：它是这个否定结论的证据，三个脚本都能复跑，
-下次有人再问「wasm 能不能搬后端」时，答案带着数据而不是印象。
-
----
-
-## 六、这条路上量出来的三条事实（计划作废了，这三条别跟着丢）
-
-**一、`server.ts` 搬不动，不是「改改就行」。** 里面有 16 处 DOM 引用。大多数好换
-（`window.setTimeout`、`Blob`、`URL.createObjectURL`），但有一处是**真的在用 canvas 光栅化 SVG**
-（第 287 行，`document.createElement("canvas")` → `drawImage` → `toBlob`），
-那是给 x2t 吃不下的图片格式做的兜底。**这条现在成了一条支持「别搬」的理由**
-——将来若有人再提「把协作会话搬到 Node」，这 16 处是要先算进去的成本。
-
-**二、`server/` 的定位别让它漂。** 项目自己规划的是把它挪进 `demo/`
-（`NEXT-SESSION-PROMPT.md` 第三件事）。既然后端那条路不做了，这个定位就更清楚了：
-**它是 demo 的自证设施，不是产品后端，也不该再长新能力。**
-产品那一侧的宿主集成是 `doc-server` 的活。
-
-**三、许可这条与做不做后端无关，仍然成立。** `src/` 整棵树是 AGPL-3.0。
-只要这个组件被拿去给别人用（第八节那几种情况全是），
-README 那两条不许越过的线就一直有效——尤其第一条「接受了 AGPL 就要真的做到」，
-界面上那个法律声明入口是硬要求。
+**`poc/backend-x2t/` stays**: it is the evidence for this negative conclusion, and all three scripts can be rerun.
+The next time someone asks "can the wasm move to the back end", the answer comes with data rather than impressions.
 
 ---
 
-## 七、「搬到后端就能不让浏览器拿到原文」——不成立
+## 6. Three facts measured along this path (the plan is void, but do not lose these three)
 
-这条单独写一节，因为它看起来很像 C 的附带收益，而**它不是**。
-实测脚本：`node poc/backend-x2t/probe-what-browser-gets.mjs`（自带一份带元数据与隐藏文字的夹具）。
+**1. `server.ts` cannot be moved; it is not a matter of "a few tweaks".** It contains 16 DOM references. Most are easy to replace
+(`window.setTimeout`, `Blob`, `URL.createObjectURL`), but one of them **really uses canvas to rasterize SVG**
+(line 287, `document.createElement("canvas")` → `drawImage` → `toBlob`),
+which is the fallback for image formats x2t cannot handle. **This has now become a reason in favor of "do not move it"**:
+if anyone proposes "move the collaboration session to Node" again, these 16 places are a cost to count first.
 
-搬完之后浏览器收到的确实不再是那份 docx，而是 `Editor.bin`。但手里有 `Editor.bin` 的人：
+**2. Do not let the role of `server/` drift.** The project plans to move it into `demo/`
+(the third item in `NEXT-SESSION-PROMPT.md`). Now that the back-end path is not being pursued, its role is even clearer:
+**it is the demo's self-verification tool, not a product back end, and it should not grow new capabilities.**
+Host integration on the product side is the job of the host application's own document-management back end.
 
-| 问 | 实测 |
+**3. The licensing point is independent of whether a back end is built, and still holds.** The whole `src/` tree is AGPL-3.0.
+As long as this component is handed to others to use (every case in section 8 is like that),
+the two rules in README.md that we do not break stay in force. In particular the first one, "Having accepted the AGPL, we comply with it for real":
+the legal notice entry in the UI is a hard requirement.
+
+---
+
+## 7. "Moving to the back end keeps the original content away from the browser": does not hold
+
+This gets its own section because it looks very much like a side benefit of C, and **it is not**.
+Measurement script: `node poc/backend-x2t/probe-what-browser-gets.mjs` (it brings its own fixture with metadata and hidden text).
+
+After the move, what the browser receives is indeed no longer that docx but `Editor.bin`. But for someone holding `Editor.bin`:
+
+| Question | Measured |
 |---|---|
-| 正文读得出来吗 | **读得出来。**明文 UTF-16LE，不加密不混淆。30 行 JS 直接拉出「八年级数学 · 一次函数 教学设计」 |
-| 原文件里不显示的东西还在吗 | **还在。**作者元数据与 `w:vanish` 隐藏文字**逐字跟着过去**——服务端转换不是一次净化 |
-| 还原得回 docx 吗 | **还原得回。**8912 字节、147 个正文字符。而且**不需要另外准备工具：浏览器自己就带着那份 x2t.wasm**，这正是导出按钮在做的事 |
+| Can the body text be read? | **Yes.** Plain UTF-16LE, not encrypted or obfuscated. 30 lines of JS pull out "八年级数学 · 一次函数 教学设计" ("Grade 8 Mathematics · Linear Functions · Lesson Plan") directly |
+| Is what the original file does not display still there? | **Yes.** Author metadata and `w:vanish` hidden text **go along word for word**. Server-side conversion is not a sanitization step |
+| Can it be restored to docx? | **Yes.** 8912 bytes, 147 body characters. And **no extra tool is needed: the browser already carries that x2t.wasm**, which is exactly what the export button does |
 
-**真 DocumentServer 也是这么发的**，而且它没打算挡住这件事：
+**The real DocumentServer sends content the same way**, and it does not try to prevent this:
 
 ```js
 var documentUrl = urls['Editor.bin'] || urls['origin.' + t.documentFormat];
 ```
-（`sdkjs/word/sdk-all-min.js`）——**首选发 bin，取不到就直接发原文件**。
+(`sdkjs/word/sdk-all-min.js`): **it prefers sending the bin, and if that is not available it sends the original file directly**.
 
-### 根因
+### Root cause
 
-**编辑器在浏览器里排版和渲染，所以文档内容必须到浏览器。** 这不是实现选择，是架构定的。
-只要页面上能看见字，客户端就已经有了这些字。任何「禁止下载/禁止复制」都是劝阻，不是边界。
+**The editor lays out and renders in the browser, so the document content must reach the browser.** This is not an implementation choice; the architecture dictates it.
+As long as text is visible on the page, the client already has that text. Any "no download / no copy" is a deterrent, not a boundary.
 
-### 那什么才挡得住
+### Then what can actually stop it
 
-先分清要的是「能编辑」还是「只要能看」：
+First decide whether you need "can edit" or "only needs to view":
 
-| 要什么 | 能做到吗 | 代价 |
+| What you need | Can it be done? | Cost |
 |---|---|---|
-| 能编辑，且浏览器拿不到内容 | **做不到。**别在这上面花时间 | — |
-| 只要能看 | **服务端渲染成像素，浏览器只收图**——走 DS 或 kkFileView，别自己写 | 不能选中复制、不能搜索、体积大；⚠ 截图与 OCR 仍能取回 |
-| 只要能看，但想省事发 PDF | ⚠ **PDF 不算。**里面的文字是可提取的，发 PDF 等于发文本 | — |
-| 降低泄漏后果 | 水印 + 审计留痕，把「防泄漏」换成「可追溯」 | 挡不住有心人，但改变了成本 |
-| 真正敏感的内容 | **不进这份文档**。分级，敏感段落走另一条不落到富文本编辑器的路 | 要改业务，不是改架构 |
+| Can edit, and the browser cannot get the content | **No.** Do not spend time on it | — |
+| Only needs to view | **Render to pixels on the server; the browser receives only images.** Use DS or kkFileView; do not write your own | Cannot select and copy, cannot search, large size; ⚠ screenshots and OCR can still recover the content |
+| Only needs to view, but sending PDF would be easier | ⚠ **PDF does not count.** The text inside is extractable; sending PDF is sending text | — |
+| Reduce the consequences of a leak | Watermarks + audit trail, turning "prevent leaks" into "traceable" | Does not stop a determined person, but changes the cost |
+| Truly sensitive content | **Keep it out of this document.** Classify it; sensitive passages take another route that never reaches a rich-text editor | Requires changing the business process, not the architecture |
 
 ---
 
-## 八、那 onlyoffice-web 还为什么存在
+## 8. Then why does onlyoffice-web still exist
 
-否掉后端 wasm 之后，真正该问的是这一条。**它的答案不在「轻 / 重」那条轴上**——
-按轻重排的话，DS 在这个平台上根本不重（50 并发多吃 30 MiB），这条轴分不出东西来。
+After rejecting back-end wasm, this is the question that really needs asking. **Its answer is not on the "light / heavy" axis**:
+ranked by weight, DS measures as not heavy at all (50 concurrent connections add 30 MiB), so this axis does not separate anything.
 
-判据是另一条：
+The criterion is a different one:
 
-> **这个页面能不能容忍「打开一份文档，要先跟一个服务建一次会话」？**
+> **Can this page tolerate "opening a document requires first establishing a session with a service"?**
 
-| 能容忍 | 不能容忍 |
+| Can tolerate | Cannot tolerate |
 |---|---|
-| 用 **DS**。已经装了、量过、`doc-server` 已经接了，一分新工作都没有 | 用**浏览器端那份**。代价是没有协作、四个格式有缺口、每人下 36 MB |
+| Use **DS**. Its overhead has been measured; wherever DS is already deployed and the host's document back end is already connected to it, there is zero new work | Use **the in-browser version**. The cost is no collaboration, gaps in four formats, and 36 MB per person |
 
-「不能容忍」具体是哪几种情况，值得写死，否则这个项目会因为没有边界而慢慢什么都想做：
+Which cases count as "cannot tolerate" is worth pinning down; otherwise this project will slowly try to do everything for lack of a boundary:
 
-1. **要把编辑器发给别人**——第三方或别的团队引用这个组件，不能要求对方先部署一个 1.3 GB 的容器。
-   这是 `frontends/packages/*` 与 `vue-sdk` 那条线的形状，也是本项目 README 第一句写的定位。
-2. **纯静态托管**：产物拷到任意静态服务器就能跑，没有后端进程。
-   （与 `frontends/example/playback-lab` 同一档。）
-3. **离线或断网演示**。
-4. 门户里嵌一个**只读预览**，不想为一次预览走「建会话 → 发令牌 → 挂回调」那一整套。
+1. **The editor has to be handed to others**: third parties or other teams use this component, and you cannot require them to deploy a 1.3 GB container first.
+   This is the shape of a reusable front-end component package, and it is also the positioning stated in the first sentence of this project's README.md.
+2. **Pure static hosting**: copy the build output to any static server and it runs, with no back-end process.
+3. **Offline or disconnected demos**.
+4. Embedding a **read-only preview** in a host application, without going through the whole "create session → issue token → register callback" sequence for a single preview.
 
-⚠ **第 4 条今天最需要重新掂量。** `NEXT-SESSION-PROMPT.md` 里排在第一件的「加查看器选项」
-就是冲它去的，而它的前提是「门户拿不到 DS」——**这个前提今天在 dev 上已经不成立了**
-（`doc-node` 在 `.40` / `.42` / `.43` 上跑着，`doc-server` 默认就用它）。
-prod 上还没装，但按 ops 的设计那是**清单里加一行**的事，角色目录早就在了，不是一项新工程。
+⚠ **Case 4 is the one that most needs re-weighing today.** "Add a viewer option", the first item in `NEXT-SESSION-PROMPT.md`,
+is aimed at it, and its premise is "the host application cannot get DS". **That premise does not hold wherever DS is already available.**
+For an environment where DS is not yet deployed, installing one is a matter of deployment configuration, not a new engineering project.
 
-所以做那一档之前先答一句：**省掉的那次会话，值不值得维护第二套文档打开路径。**
-答「值」也完全站得住（前三条理由是实的），但要写下来——
-否则半年后没人说得清这个项目和 DS 是什么关系。
+So before building that tier, answer one question first: **is saving that one session worth maintaining a second path for opening documents?**
+Answering "yes" is entirely defensible (the first three reasons are real), but write it down;
+otherwise, six months from now nobody will be able to say how this project relates to DS.

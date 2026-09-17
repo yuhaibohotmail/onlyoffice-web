@@ -1,13 +1,15 @@
 # 注意事项与支持格式
 
-[← API 参考](./API参考.md) | [字体配置 →](./字体配置.md) · [批注修订 →](./批注修订与-Word-API.md)
+> [English](notes-and-formats.md) | 中文
+
+[← API 参考](./api-reference.zh.md) | [字体配置 →](./fonts.zh.md) · [批注修订 →](./comments-revisions-word-api.zh.md)
 
 ## 前置条件
 
-1. **静态资源**：将 OnlyOffice SDK（含 `web-apps/`、`sdkjs/`、`fonts/`、`x2t/`）放到站点可访问目录，默认 `public/packages/onlyoffice/9.4.0-develop/`。自定义字体需在 `AllFonts.js` 的 `__custom_font_registry__` 中注册，详见 [字体配置](./字体配置.md)。
+1. **静态资源**：将 OnlyOffice SDK（含 `web-apps/`、`sdkjs/`、`fonts/`、`x2t/`）放到站点可访问目录，默认 `public/packages/onlyoffice/9.4.0-develop/`。自定义字体需在 `AllFonts.js` 的 `__custom_font_registry__` 中注册，详见 [字体配置](./fonts.zh.md)。
 2. **环境变量**（可选）：`NEXT_PUBLIC_APP_ROOT=/packages/onlyoffice/9.4.0-develop`，与 `STATIC_RESOURCE.onlyoffice.root` 一致。
 3. **x2t 资源**：`x2t/x2t.js` 为普通 JS 文本，`x2t.wasm` 为 Brotli 预压缩文件；**无需**为 `x2t.wasm` 配置 `Content-Encoding: br`，Worker 内 `x2t-assets` 会自动解压。
-4. **DOM 容器**：页面需预留编辑器挂载点（见 [快速开始](./快速开始.md)）。
+4. **DOM 容器**：页面需预留编辑器挂载点（见 [快速开始](./getting-started.zh.md)）。
 
 ## 注意事项
 

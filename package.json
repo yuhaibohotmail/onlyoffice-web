@@ -4,7 +4,7 @@
   "type": "module",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
-  "description": "我们自己维护的浏览器版 OnlyOffice 前端组件，从社区版构建。基于 Ascensio System SIA 开发的 ONLYOFFICE，已修改。",
+  "description": "A browser-only ONLYOFFICE front-end component, built from the Community Edition. A modified version of ONLYOFFICE, developed by Ascensio System SIA.",
   "scripts": {
     "assets": "node scripts/extract-assets.mjs",
     "x2t": "node scripts/fetch-x2t.mjs",

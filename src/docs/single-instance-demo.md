@@ -1,26 +1,28 @@
-# 单实例示例
+# Single-Instance Demo
 
-[← 快速开始](./快速开始.md) | [多实例示例 →](./多实例示例.md)
+> English | [中文](single-instance-demo.zh.md)
 
-单实例场景使用 **`OnlyOfficeManager`** 门面：一个页面、一个 `containerId`、一个编辑器实例。适合文档详情、预览、简单编辑页。
+[← Getting Started](./getting-started.md) | [Multi-Instance Demo →](./multi-instance-demo.md)
 
-**在线演示**：站点路由 [`/docs/demos/single`](/docs/demos/single)  
-**完整源码**：`src/features/demo/office-preview-page.tsx`
+The single-instance scenario uses the **`OnlyOfficeManager`** facade: one page, one `containerId`, one editor instance. It suits document detail pages, previews, and simple editing pages.
 
-## 在线演示
+**Live demo**: site route [`/docs/demos/single`](/docs/demos/single)  
+**Full source**: `src/features/demo/office-preview-page.tsx`
 
-下方为可交互的单实例编辑器。
+## Live Demo
+
+Below is an interactive single-instance editor.
 
 <!-- demo:single -->
 
-## 核心思路
+## Core Approach
 
-1. 挂载固定 `containerId` 的 DOM 容器  
-2. `OnlyOfficeManager.create` 初始化空白文档，或 `createWithFile` 打开本地文件  
-3. 工具栏调用 `openDocument` / `downloadExport` / `toggleReadOnly` / `setTheme` / `toggleLanguage` / `printLogs`  
-4. 页面卸载时 `manager.destroy()`
+1. Mount a DOM container with a fixed `containerId`  
+2. `OnlyOfficeManager.create` initializes a blank document, or `createWithFile` opens a local file  
+3. The toolbar calls `openDocument` / `downloadExport` / `toggleReadOnly` / `setTheme` / `toggleLanguage` / `printLogs`  
+4. Call `manager.destroy()` when the page unmounts
 
-## 容器组件
+## Container Component
 
 ```tsx
 "use client";
@@ -42,7 +44,7 @@ const OnlyOfficeHost = memo(function OnlyOfficeHost() {
 });
 ```
 
-## 初始化与销毁
+## Initialization and Destruction
 
 ```tsx
 useEffect(() => {
@@ -89,7 +91,7 @@ useEffect(() => {
 }, []);
 ```
 
-## 工具栏操作
+## Toolbar Actions
 
 ```tsx
 const handleOpenDocument = (fileName: string, file?: File) =>
@@ -113,13 +115,13 @@ const handleLanguageSwitch = async () => {
 };
 ```
 
-## 页面结构
+## Page Structure
 
 ```tsx
 export function OfficePreviewPage({ embedded = false, ...props }) {
   return (
     <div className={`flex flex-col bg-white ${embedded ? "h-full min-h-0" : "h-screen"}`}>
-      <header>{/* 语言 / 主题 / 上传 / 新建 / 导出 / 只读 */}</header>
+      <header>{/* Language / Theme / Upload / New / Export / Read-only */}</header>
       <div className="relative min-h-0 flex-1">
         <OnlyOfficeHost />
         {loading && <LoadingOverlay />}
@@ -130,14 +132,14 @@ export function OfficePreviewPage({ embedded = false, ...props }) {
 }
 ```
 
-## 支持能力
+## Supported Capabilities
 
-| 能力 | API |
+| Capability | API |
 |------|-----|
-| 上传文件 | `manager.openDocument({ fileName, file })` |
-| 新建空白 | `manager.openDocument({ fileName: defaultFileName })` |
-| 导出 | `manager.downloadExport()` |
-| 只读切换 | `manager.toggleReadOnly()` |
-| 主题 | `manager.setTheme(theme)` |
-| 语言 | `manager.toggleLanguage()` |
-| 打印日志 | `manager.printLogs()` |
+| Upload a file | `manager.openDocument({ fileName, file })` |
+| New blank document | `manager.openDocument({ fileName: defaultFileName })` |
+| Export | `manager.downloadExport()` |
+| Toggle read-only | `manager.toggleReadOnly()` |
+| Theme | `manager.setTheme(theme)` |
+| Language | `manager.toggleLanguage()` |
+| Print logs | `manager.printLogs()` |

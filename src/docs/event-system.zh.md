@@ -1,6 +1,8 @@
 # 事件系统
 
-[← 核心 API](./核心API.md) | [完整示例 →](./完整示例.md)
+> [English](event-system.md) | 中文
+
+[← 核心 API](./core-api.zh.md) | [完整示例 →](./full-examples.zh.md)
 
 OnlyOffice Web Comp 使用 EventBus 进行跨模块事件通信。
 
@@ -148,7 +150,7 @@ function EditorPage() {
 - `asc_onShowRevisionsChange` — 修订列表变化
 - `asc_onDocumentModifiedChanged` — 文档修改状态
 
-详见 [批注修订与 Word API](./批注修订与-Word-API.md)。
+详见 [批注修订与 Word API](./comments-revisions-word-api.zh.md)。
 
 ## 取消监听
 

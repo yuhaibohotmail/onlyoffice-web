@@ -72,7 +72,8 @@ const 查 = (说的是什么, 判) => {
   const s = 读("NOTICE.md");
   if (!s) return "NOTICE.md 不在";
   if (!s.includes("Ascensio System SIA")) return "没写原始开发者是谁";
-  if (!s.includes("修改过的版本")) return "没写这是一个修改版";
+  // 【2026-09-17】NOTICE.md 改成了英文（中文副本是 NOTICE.zh.md，可选），所以这里认英文的说法。
+  if (!s.includes("modified version")) return "没写这是一个修改版（modified version）";
   if (!/20\d\d-\d\d-\d\d/.test(s)) return "没写修改日期";
   return true;
 });
