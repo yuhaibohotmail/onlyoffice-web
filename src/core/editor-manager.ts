@@ -106,8 +106,8 @@ export type CreateEditorViewOptions = {
  * lang / coEditing / user / customization。于是插件只剩「登记表」一条路
  * （静态根目录下那份 plugins.json），而那条路给不了 `options`。
  *
- * 而 `options` 是**编辑器给插件下发配置的唯一通道**：真实部署里 doc-server
- * 往这里放的是插件访问后端要用的凭证。所以要回答「将来接真 doc-server 时
+ * 而 `options` 是**编辑器给插件下发配置的唯一通道**：真实部署里后端
+ * 往这里放的是插件访问后端要用的凭证。所以要回答「接真实后端时
  * 插件能不能拿到凭证」，就必须把这一格补上——这也正是本轮的发现之一：
  * **这套纯前端组件要支持插件，得改它自己的源码**（它是 AGPL-3.0）。
  */

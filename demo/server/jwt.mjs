@@ -5,8 +5,8 @@
  * 而不是「某个 jwt 库能用」。手写三十行反而让**校验到底查了哪几样**一眼看得见
  * ——过期、签名、以及下面那两条交叉核对，缺哪一条都能当场指出来。
  *
- * 真实的 doc-server 用的是 RS256 + 一对密钥文件（mp.jwt），claims 的形状照抄了它的
- * TokenService：iss / sub / scope / documentIds / exp。换回去时只有算法这一层要改。
+ * claims 的形状是 iss / sub / scope / documentIds / exp。真实后端多用 RS256 这类
+ * 非对称算法，换过去时只有算法这一层要改。
  */
 import crypto from "node:crypto";
 

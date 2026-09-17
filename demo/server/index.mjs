@@ -6,8 +6,8 @@
  *   取件  GET  /api/internal/download/{docId}/{cacheKey}/{name}?token=...
  *   存件  POST /api/documents/{docId}/content        （octet-stream + Bearer）
  *
- * 路径名照 doc-server 的形状取，将来好换；但**代码是新写的，不连它、也不连别的任何服务**。
- * 与 doc-server 的对应关系逐条写在各处理函数的注释里，其中有一条对不上，见 saveContent()。
+ * 路径名照一个真实文档服务后端的形状取，将来好换；但**代码是新写的，不连任何外部服务**。
+ * 与那种后端的对应关系写在各处理函数的注释里，其中有一条对不上，见 saveContent()。
  *
  * 顺带伺服两样静态资源，都是**只读**：
  *   /packages/**  从社区版镜像抽出来的静态资源，外加转换引擎与它的字体（plugins.json 现编，见下）
@@ -239,7 +239,7 @@ function readBody(req, limit = 100 * 1024 * 1024) {
 // 两种票，故意分开：
 //   session  给浏览器用，走 Authorization 头，管「你能动哪几份文档、能做什么」
 //   download 给取件用，**走 query 参数**，只管一次取件，短命
-// doc-server 就是这么分的。合成一种的话，一个能贴进地址栏、会被日志与 Referer
+// 真实的文档服务后端也该这么分。合成一种的话，一个能贴进地址栏、会被日志与 Referer
 // 带出去的字符串就有了写权限。
 
 const SESSION_TTL = 900;
@@ -358,7 +358,7 @@ function pluginManifest() {
 
 // ── 端点 ──────────────────────────────────────────────────────────────────
 
-/** 编辑器配置。对齐 doc-server 的 GET /docserver/api/editor/config/{docId}。 */
+/** 编辑器配置。对应真实文档服务后端里「取编辑器配置」那个接口。 */
 function editorConfig(req, res, docId, query) {
   const auth = requireSession(req, docId, null);
   if (!auth.ok) return json(res, auth.code, { error: auth.reason });
@@ -366,7 +366,6 @@ function editorConfig(req, res, docId, query) {
 
   const meta = storage.readMeta(docId);
   // cacheKey 取内容摘要的前 12 位：内容变了地址就变，浏览器缓存不会拿旧的糊弄人。
-  // doc-server 那边同样是内容摘要（contentMd5），作用一样。
   const cacheKey = meta.sha256.slice(0, 12);
   const downloadToken = sign({
     iss: "onlyoffice-web",
@@ -392,7 +391,7 @@ function editorConfig(req, res, docId, query) {
       lang: "zh",
       user: { id: auth.claims.sub, name: auth.claims.userName || auth.claims.sub },
     },
-    // 存件地址一并给出来，前端不必自己拼——将来换真 doc-server 时换的就是这一格。
+    // 存件地址一并给出来，前端不必自己拼——将来换成真实的后端时换的就是这一格。
     saveUrl: "/api/documents/" + docId + "/content",
   };
 
@@ -405,7 +404,7 @@ function editorConfig(req, res, docId, query) {
         pluginsData: [originOf(req) + "/plugins/config.json"],
         autostart: [man.guid],
         // ⚠ options 是**给插件下发配置的唯一通道**，登记表那条路没有这一格。
-        // 真实那条路上，doc-server 往这里放的是插件访问后端要用的凭证。
+        // 真实部署里，后端往这里放的是插件访问后端要用的凭证。
         options: {
           [man.guid]: {
             probe: PLUGIN_OPTIONS_PROBE,
@@ -420,9 +419,8 @@ function editorConfig(req, res, docId, query) {
 }
 
 /**
- * **取件。** 对齐 doc-server 的 InternalDownloadResource：
- * 令牌走 query 不走头（这条地址是要交给编辑器/浏览器直接去取的，加不了自定义头），
- * 并且照它那样做两条交叉核对——票上写的 docId / cacheKey 必须与地址里的那两段一致。
+ * **取件。** 令牌走 query 不走头（这条地址是要交给编辑器/浏览器直接去取的，加不了自定义头），
+ * 并且做两条交叉核对——票上写的 docId / cacheKey 必须与地址里的那两段一致。
  *
  * 少了那两条核对的话，一张给 A 文档签的票能去取 B 文档，而签名校验照样通过。
  */
@@ -452,13 +450,13 @@ function download(req, res, docId, cacheKey, query) {
 /**
  * **存件。**
  *
- * ⚠ **doc-server 今天没有这个接口。** 它只有两条写路径：
- *   ① POST /docserver/api/documents —— multipart，建**新文档**，不是给已有文档加版本；
- *   ② 文档服务器自己回调 POST /docserver/api/editor/callback —— 它给一段带 url 的 JSON，
- *      我们再回头去 GET 那个 url 把字节取回来。
- * 版本、审计、配额全挂在②上。纯前端这条路是**浏览器直接把字节推过来**，方向相反，
- * 所以这一格是我们凭空加的。真要落地，doc-server 得新增这个接口，
- * 并且把挂在②上的那些东西一起搬过来——这条写进报告。
+ * ⚠ **接 ONLYOFFICE 文档服务器的后端通常没有这个接口。** 那种后端的写路径是两条：
+ *   ① 上传建**新文档**，不是给已有文档加版本；
+ *   ② 文档服务器自己回调后端的 callback 地址——它给一段带 url 的 JSON，
+ *      后端再回头去 GET 那个 url 把字节取回来。
+ * 版本、审计、配额一般挂在②上。纯前端这条路是**浏览器直接把字节推过来**，方向相反，
+ * 所以这一格是我们自己加的。要接进那样的后端，就得新增这个接口，
+ * 并且把挂在②上的那些东西一起搬过来。
  */
 async function saveContent(req, res, docId) {
   const auth = requireSession(req, docId, "document:edit");

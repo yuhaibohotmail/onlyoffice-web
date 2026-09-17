@@ -25,7 +25,7 @@ const 这里 = (p: string) => fileURLToPath(new URL(p, import.meta.url));
  *
  *   static-check.html  只开一份空白文档。**零夹具、零 mock**，
  *                      用来单独回答「笨静态服务器后面这套东西能不能正常工作」。
- *   index.html         宿主页（外层），替将来的控制台/门户。
+ *   index.html         宿主页（外层），替将来真正嵌入编辑器的那个应用。
  *   embed.html         **接入页**——iframe 里那一个，这个 PoC 真正的产出物。
  *
  * ⚠ **worker 必须打成 es 模块。** 格式转换那半跑在一个 Web Worker 里，
@@ -41,7 +41,7 @@ export default defineConfig({
    *
    * vite 默认 `base: "/"`，于是页面里写的是 `<script src="/assets/xxx.js">`。
    * 那在挂到站点根上时没问题，而装机时这一套挂在 `/oow` 底下
-   *（单域名那个站的根归门户）——那时 HTML 打得开，**它自己的 JS 全 404**，
+   *（站点根归别的应用用）——那时 HTML 打得开，**它自己的 JS 全 404**，
    * 于是页面停在「正在跑…」不动。
    *
    * ⚠ **这个症状与「静态资源根没设对」一模一样**，而两者根本不是一回事：

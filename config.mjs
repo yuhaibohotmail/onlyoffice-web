@@ -92,7 +92,7 @@ export const SDK_VERSION = DOCUMENT_SERVER.coreVersion;
 export const X2T_DIR = path.join(PROJECT_ROOT, "vendor/x2t");
 export const X2T_FONTS_DIR = path.join(PROJECT_ROOT, "vendor/x2t-fonts");
 
-/** 端口。挑一块没人用的：平台各服务在 6000 段，前两轮 PoC 占 3020-3031。 */
+/** 端口。挑一块没人用的：前两轮 PoC 占 3020-3031。 */
 export const WEB_PORT = 3040;
 export const API_PORT = 3041;
 
