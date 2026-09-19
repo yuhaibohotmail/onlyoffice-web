@@ -218,6 +218,9 @@ await initializeOnlyOffice();
 - 单例模式，多次调用只初始化一次
 - `OnlyOfficeManager.create` / `EditorManager.create` 内部会自动调用
 - 仅在手动 `fromEditor` 绑定等高级场景需要显式调用
+- 可以带一格文档类型：`initializeOnlyOffice(DocumentType.Cell)`。它决定编辑器挂上来之前
+  那个隐藏 iframe **预热哪一个编辑器的东西**。不传时预热文字编辑器，与 `getDocumentType()`
+  认不出扩展名时的默认值一致。传错了不报错，只是预热错了那一份，编辑器随后自己下自己那一份。
 
 ### 创建编辑器视图
 

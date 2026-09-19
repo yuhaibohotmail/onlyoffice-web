@@ -157,7 +157,7 @@ function editorConfigType(variant: OnlyOfficeEditorVariant | undefined) {
   return variant === "viewer" ? "embedded" : "desktop";
 }
 
-function getFileType(fileName: string, fileType?: string) {
+export function getFileType(fileName: string, fileType?: string) {
   return fileType || fileName.split(".").pop()?.toLowerCase() || "docx";
 }
 
@@ -1864,7 +1864,7 @@ export class EditorManager {
       return this;
     }
 
-    await initializeOnlyOffice();
+    await initializeOnlyOffice(getDocumentType(fileType));
 
     if (!this.isLoadSessionActive(containerId, options.loadSession)) {
       return this;

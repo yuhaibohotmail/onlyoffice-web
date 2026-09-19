@@ -37,18 +37,26 @@ npm install
 npm run assets     # extract static assets from the Community Edition image (~1.5 GB; local docker, or ssh to a host running the image)
 npm run x2t        # fetch the conversion engine (6.5 MB, verified against the official checksum)
 npm run fonts      # set up the fonts used for PDF export (7 MB, bold/italic verified one by one)
+npm run precompress  # write a .gz next to every large file in vendor/ (33 s; halves what goes over the wire)
 
 npm run server     # 3041: document fetch / save, serves static assets, plugins and license texts
 npm run dev        # 3040: the page
-npm run e2e        # automated tests (17 cases; every assertion checks the artifact itself)
+npm run e2e        # automated tests (19 cases; every assertion checks the artifact itself)
 ```
 
-Some quick checks. **The first three need no infrastructure and finish in under a second**; the rest need both servers running plus a real browser:
+`npm run assets` also generates one warm-up page per editor (`npm run preload-pages` regenerates them on their own).
+`npm run precompress` is run automatically by `npm run release`; run it by hand only when working against `vendor/`
+directly. Together the two are worth a lot: opening one document cold transfers **58.5 MB instead of 221.7 MB**
+(FINDINGS §15).
+
+Some quick checks. **The first five need no infrastructure and finish in under a second**; the rest need both servers running plus a real browser:
 
 ```sh
 npm run check:legal    # are the compliance requirements still in place in the code (with a built-in revert probe)
 npm run check:fonts    # does each font file really contain the typeface its name says (with a built-in reverse probe)
 npm run check:rule     # is the editor rule we copied still worded the same upstream
+npm run check:preload-pages  # is there one warm-up page per editor, and does it still match its app.js
+npm run check:precompress    # does every large file in vendor/ have an up-to-date .gz
 
 npm run check:404              # does anything fail to load when opening a document
 npm run check:404 -- --pdf     # same, opening a PDF
@@ -105,10 +113,17 @@ it stops if anything in `vendor` is missing and tells you which command to run; 
 |---|---|---|
 | `OOW_TOKEN_SECRET` | Secret used to sign tickets, at least 16 characters | **A random secret is generated at every start**, so all old tickets become invalid after a restart (fine for local development; set it for real deployments) |
 | `OOW_SOURCE_URL` | URL of the source repository (for this project: <https://github.com/yuhaibohotmail/onlyoffice-web>) | The "Get source code" link in the UI serves an archive built on the fly by this server instead |
+| `OOW_NO_PRECOMPRESSED` | Set to `1` to stop serving the `.gz` copies. **Only for measuring**: it is the control case for "how much does compression actually save" | The `.gz` copy is served whenever one exists and the client accepts gzip |
 
 The front-end half needs a web server that serves `dist/` and forwards four paths, `/api`, `/packages`, `/plugins` and `/legal`,
 to the back end. ⚠ **Everything must be same-origin**: the editor runs in an iframe and plugins open another iframe inside the editor;
 if any layer is cross-origin, the parent page cannot read anything, **and the symptom is "the editor never shows up"**.
+
+If that web server serves the static tree directly rather than proxying it, turn on `gzip_static on; gzip_vary on;`
+(nginx). The `.gz` copies are already in the package, so this costs nothing at request time, and it is the difference
+between transferring 58.5 MB and 131.1 MB on a first visit. ⚠ `gzip_static` is **not** governed by `gzip_types`, which
+is why it also covers the font files — they have no extension at all and are the largest group.
+⚠ Nothing breaks when this is off; the only symptom is twice the traffic, reported by nothing.
 Under `dev` and `vite preview`, vite handles this (the four proxies in `demo/vite.config.ts`);
 with nginx you have to configure it yourself.
 
@@ -179,9 +194,10 @@ not the image name, because a tag like `9.4.0.1` can be pushed again while an ID
 
 ## Current status
 
-**All 17 automated tests pass** (`npm run e2e`): the fetch gate, fetching from the server and rendering the first screen, typing with a real keyboard,
+**All 19 automated tests pass** (`npm run e2e`): the fetch gate, fetching from the server and rendering the first screen, typing with a real keyboard,
 saving back to the server with the bytes on disk actually changing, rejecting writes without a ticket, four plugin checks (plugin panel / inserting a formula / in-document button / delivering configuration),
-the control case with registration turned off, official plugin registration, the two PDF kinds each going to their own app, and the editor and viewer being two different apps.
+the control case with registration turned off, official plugin registration, the two PDF kinds each going to their own app, the editor and viewer being two different apps,
+warming up only the editor the document needs, and the compressed copies actually going over the wire.
 
 | Item | Status |
 |---|---|
@@ -194,7 +210,7 @@ the control case with registration turned off, official plugin registration, the
 | Visio | ⚠ The `visioeditor` app is in the tree, but **no test has touched it yet**. "The files are there" and "it opens" are two different things |
 | Production build | ✅ Fixed on 2026-08-30. Before that, `npm run build` always failed (the worker bundle format did not support code splitting), **while dev kept working** (see section 12 of FINDINGS) |
 | Viewer | ✅ Added on 2026-08-30 as a `variant` option on the component (editor / viewer), covered by test B16. ⚠ **But it does not reduce download size**: measured cold load for the same document goes from 221.7 MB to 211.9 MB, only 4.4% less, all of it the app shell and plugin panel; the "0.5 MB vs 94.6 MB" on disk does not translate into download size. What it really saves is 265 requests and most of the interactive UI. See section 14 of FINDINGS |
-| How much one document open downloads | ⚠ **Cold load 221.7 MB / 437 requests** (warm load 91 KB, so long-term caching is working). Most of it is not the editor UI: the component's preload iframe downloads **the SDKs of all four editors** (only one is used), about 110 MB; Chinese fonts are about 85 MB; and both the unminified and minified builds of the same SDK are downloaded. `npm run measure:payload` measures it again; full table in section 14 of FINDINGS |
+| How much one document open downloads | ✅ **Cold load 58.5 MB / 387 requests**, down from 221.7 MB / 437 (warm load 91 KB either way). Two changes, each measured: the warm-up iframe now pulls only the editor this document needs instead of all four (−90.6 MB), and every large file has a `.gz` beside it that the server sends (−72.6 MB). ⚠ **Chinese fonts are now 82% of what is left** (48.2 MB) — they are pulled whole, per typeface the document declares, and only compress by about 40%. `npm run measure:payload` measures it again; full account in section 15 of FINDINGS |
 | `mobile` / `forms` entry points | ⚠ Still unused, and no test has touched them. The `variant` option only exposes `embed` |
 | Release | ⚠ **A complete package that runs can now be assembled** (`npm run release`, tested by running it as if on a target machine: document opens, 2 plugins in the panel, export of 25,518 bytes, all four license links present). The code is published at <https://github.com/yuhaibohotmail/onlyoffice-web>. **It has not been deployed to any machine yet**, and there is no CI |
 | The five compliance terms | See below |

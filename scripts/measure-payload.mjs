@@ -243,7 +243,10 @@ async function 量一趟(ctx, variant, 标签) {
     const 走过 = new Set();
     while (父.has(f) && 父.get(f) !== 顶层 && !走过.has(f)) { 走过.add(f); f = 父.get(f); }
     const u = 地址.get(f) || "";
-    if (/preload\.html/.test(u)) return "预载 iframe";
+    // ⚠ 认预载页要连按类型分开的那几份一起认（`preload-documenteditor.html` 等）。
+    // 只写 `preload\.html` 的话，预载 iframe 的请求会**静静地并进编辑器 iframe 那一格**
+    // ——「预载到底有没有在干活」这个问题就此没有读数，而表看着还很整齐。
+    if (/preload(-[a-z]+)?\.html/.test(u)) return "预载 iframe";
     if (!父.has(f) && f !== 顶层) return "主页面";   // 已经拆掉的 frame，认不出就算主页面
     return "编辑器 iframe";
   }

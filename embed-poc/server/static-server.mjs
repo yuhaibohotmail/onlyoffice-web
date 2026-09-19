@@ -284,9 +284,29 @@ const server = http.createServer((req, res) => {
 
   const st = fs.statSync(f);
   const 带版本 = urlPath.startsWith(根前缀 + "/");
+
+  /**
+   * 旁边配着 `.gz` 而且对方收得下压缩的，就发那一份——nginx `gzip_static on` 的等价物。
+   * 那几份由 `node scripts/precompress.mjs` 配；与后端那一份是同一套判据
+   * （见 demo/server/index.mjs 的 serveFile）。
+   */
+  let 发的 = f;
+  let 长度 = st.size;
+  let 编码 = null;
+  if (process.env.OOW_NO_PRECOMPRESSED !== "1" && /\bgzip\b/.test(String(req.headers["accept-encoding"] || ""))) {
+    try {
+      const gz = fs.statSync(f + ".gz");
+      if (gz.isFile() && gz.mtimeMs >= st.mtimeMs) { 发的 = f + ".gz"; 长度 = gz.size; 编码 = "gzip"; }
+    } catch { /* 没配那一份就照原样发 */ }
+  }
+
   res.writeHead(200, {
+    // ⚠ 类型取**原文件**的扩展名，不取 .gz 的——取错的话每个文件都变成 application/gzip，
+    // 脚本不执行、wasm 拒收，而响应码仍然是 200。
     "content-type": 类型表[path.extname(f).toLowerCase()] || "application/octet-stream",
-    "content-length": st.size,
+    "content-length": 长度,
+    ...(编码 ? { "content-encoding": 编码 } : {}),
+    vary: "accept-encoding",
     // 带版本号的那棵树是不可变资源，真部署一定是长缓存；别的都不缓存。
     "cache-control": 带版本 ? "public, max-age=31536000, immutable" : "no-store",
     /**
@@ -304,7 +324,7 @@ const server = http.createServer((req, res) => {
      */
     "access-control-allow-origin": "*",
   });
-  fs.createReadStream(f).pipe(res);
+  fs.createReadStream(发的).pipe(res);
 });
 
 server.listen(PORT, "0.0.0.0", () => {

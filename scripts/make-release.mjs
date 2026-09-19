@@ -27,7 +27,7 @@
  * 后端是**零第三方依赖**的（只用 `node:` 内置），所以发布包里不需要 `node_modules`。
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -138,6 +138,28 @@ fs.cpSync(path.join(PROJECT_ROOT, "dist"), path.join(出到, "dist"), { recursiv
 console.log("  前端产物  dist/           " + 人读(量大小(path.join(出到, "dist"))));
 
 if (带VENDOR) {
+  /**
+   * 拷之前先把预压缩副本配齐。
+   *
+   * ⚠ **必须在拷之前**：`fs.cpSync` 是整棵拷过去的，那时候盘上有什么就带走什么。
+   * 配在后面的话，本机这棵树是压过的、发布包里那棵不是，
+   * **而两边都能跑起来**——差别只在装到机器上之后每次冷载多下一倍多的字节。
+   *
+   * 不想要就加 `--no-precompress`（发布包会小一半，但发出去的字节会大一倍多）。
+   */
+  if (!process.argv.includes("--no-precompress")) {
+    console.log("  预压缩    配 .gz（nginx gzip_static 会发它们）…");
+    const r = spawnSync(process.execPath, [path.join(PROJECT_ROOT, "scripts/precompress.mjs")], {
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    if (r.status !== 0) {
+      console.error("✗ 预压缩没跑成（退出码 " + r.status + "）。要跳过就加 --no-precompress。");
+      process.exit(1);
+    }
+  } else {
+    console.log("  预压缩    跳过（--no-precompress）——装上去之后发的是没压过的字节");
+  }
+
   // 一棵一棵拷，好让人看见进度——整棵 1.5 GB，闷着拷会让人以为卡住了。
   for (const 名 of fs.readdirSync(path.join(PROJECT_ROOT, "vendor"))) {
     const 从 = path.join(PROJECT_ROOT, "vendor", 名);
@@ -183,6 +205,25 @@ which looks like a broken editor rather than the same-origin policy.**
 ⚠ The reverse proxy must pass \`Host\` through unchanged (or set \`X-Forwarded-Host\` / \`X-Forwarded-Proto\`).
 The back end uses it to build the absolute URLs in the plugin registry; if it is wrong, **plugins silently do not appear**,
 while documents still open and export, and nothing on the first screen shows the problem.
+
+## Serving the compressed copies (turn this on)
+
+Every file over 1 KB in \`vendor/\` has a \`.gz\` next to it, built at packaging time. Opening one document cold
+transfers **58 MB with them and 131 MB without**, so this is worth one line of configuration.
+
+If a web server sits in front of the static tree, point it at those files instead of compressing on the fly:
+
+\`\`\`nginx
+gzip_static on;
+gzip_vary   on;
+\`\`\`
+
+⚠ \`gzip_static\` is **not** governed by \`gzip_types\`, so it also covers the font files, which have no extension
+at all and are the largest single group. If you serve the tree through this package's own back end instead,
+it already does the same thing — no configuration needed.
+
+⚠ Nothing breaks when this is off. The only symptom is that every first visit transfers twice as much,
+and no error, log line or status code says so.
 
 ## License (not optional)
 

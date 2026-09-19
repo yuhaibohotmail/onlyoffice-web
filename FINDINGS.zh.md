@@ -459,6 +459,9 @@ demo 页面上因此是两个控件，按钮上的字也写明了「切成只读
 3. 同一个 sdk 的**未压缩版与压缩版都下了**（`sdk-all.js` 27.5 MB + `sdk-all-min.js` 3.4 MB）
 4. 应用外壳 + 插件面板 ≈ 10 MB ← **只有这一格是查看器能省的**
 
+> 第 1 条与第 3 条后来改掉了，整棵树现在也压着发：冷载是 **58.5 MB**，不是 221.7 MB。
+> 这一节的数是「改之前」那一份——改了什么、还剩什么，见第十五节。
+
 **这一档的价值因此要换个说法**：它省的不是字节（4.4%），是
 **少 265 个请求、没有编辑入口、没有插件面板**——
 给宿主应用嵌一个只读文档时，少的是那一整片交互面，不是流量。
@@ -514,3 +517,145 @@ B16 当场红在第一条（`查看器那档没落在 documenteditor/embed：...
 另外单独量了一眼，那时查看器那档的插件面板是 2、功能区标签是 13
 ——**也就是说第 3 条自己也够把这次退化认出来**，不是靠第 1 条兜着。
 验完还原，字节核对一致。
+
+## 十五、冷载从 221.7 MB 降到 58.5 MB，分两步
+
+第十四节把字节量出来了，但只排到「谁最大」为止。这一节是改法，两半各自量过
+（`node scripts/measure-payload.mjs`，1 号文档《一次函数教学设计.docx》，编辑器档，冷载，同一台机器同一趟）。
+
+| | 请求数 | 字节 | 首屏 |
+|---|---|---|---|
+| 改之前 | 437 | **221.7 MB** | 2159 ms |
+| 只预热这一种文档的编辑器之后 | 387 | **131.1 MB** | 906 ms |
+| 再把预压缩副本发出去之后 | 387 | **58.5 MB** | 840 ms |
+
+暖载一直是 91 KB，没动过——长缓存本来就是好的，这一节与那一列无关。
+
+### 字节到底在哪
+
+| 排名 | 文件 | 冷载字节 | 是什么 | 开 docx 用得上吗 |
+|---|---|---|---|---|
+| 1 | `sdkjs/cell/sdk-all.js` | 30.9 MB | 表格编辑器引擎 | **用不上** |
+| 2 | `sdkjs/word/sdk-all.js` | 27.5 MB | 文字编辑器引擎 | 要 |
+| 3 | `sdkjs/slide/sdk-all.js` | 27.0 MB | 演示编辑器引擎 | **用不上** |
+| 4 | `sdkjs/visio/sdk-all.js` | 22.7 MB | Visio 编辑器引擎 | **用不上** |
+| 5 | `fonts/070` | 18.8 MB | 微软雅黑 Regular | 文档声明了 |
+| 6 | `fonts/076` | 17.5 MB | 宋体 / 新宋体 | 文档声明了 |
+| 7 | `fonts/071` | 16.1 MB | 微软雅黑 Bold | 文档声明了 |
+| 8 | `fonts/073` | 10.1 MB | 仿宋 | 文档声明了 |
+| 9 | `fonts/074` | 9.3 MB | 黑体 | 文档声明了 |
+| 10 | `sdkjs/common/libfont/engine/fonts.wasm` | 3.4 MB | 字体光栅化 | 要 |
+| 11 | `sdkjs/word/sdk-all-min.js` | 3.4 MB | 引导包 | 要 |
+| 12–14 | `cell` / `slide` / `visio` 的 `sdk-all-min.js` | 8.3 MB | 它们的引导包 | **用不上** |
+| 15 | `documenteditor/main/code.js` | 2.2 MB | 界面外壳 | 要 |
+| 16–19 | 四份 `main/resources/css/app.css` | 2.3 MB | 四个外壳的样式 | 只有一份 |
+
+两族占 81%：四个编辑器引擎 108.1 MB，五个中文字体 71.8 MB。
+
+字体是**文档声明了什么就整份下什么**。`demo/fixtures/lesson-plan-zh.docx` 里声明了
+微软雅黑 / 宋体 / 黑体 / 仿宋 / Calibri，下来的正好是那五个文件：一份 3 KB 的文档拉了 71.8 MB 字体。
+这条链上任何一处都没有按用到的字取子集这回事——整份 TTF 喂进光栅化器。
+
+### 改动一：只预热这一种文档的编辑器（省 90.6 MB）
+
+⚠ **`sdk-all-min.js` 不是 `sdk-all.js` 的压缩版，是引导包。** `sdkjs/word/sdk-all-min.js` 第 34497 行那个
+`loadSdk()`：**除非 `window['AscNotLoadAllScript']` 为真**，否则在引导包之上再去拉整份 `sdk-all.js`。
+设这个标志的只有 `preload.html` 与 `cache-scripts.html`，所以编辑器每次都要拉自己那个引擎。
+
+**注入那个标志验过一次**（加进 `documenteditor/main/index.html`）：编辑器一直没就绪
+（`page.waitForFunction: Timeout 120000ms exceeded`）。所以那 27.5 MB 引擎是必须的，
+浪费的不是「未压缩那一份」，而是**这次用不到的那三个编辑器**。
+
+组件挂编辑器之前先塞一个隐藏 iframe 去预热，指的是上游那份 `preload.html`，
+而它把四个引擎、四个引导包、四个界面外壳全拉一遍，与这次开的是什么无关。
+
+现在换成：
+
+- `scripts/build-preload-pages.mjs` 按编辑器应用各生成一份
+  （`preload-documenteditor.html`、`preload-spreadsheeteditor.html`、`preload-presentationeditor.html`、
+  `preload-visioeditor.html`、`preload-pdfeditor.html`）。上游那份 `preload.html` 原样留在盘上。
+  生成器会去读每个应用的 `app.js`，`sdk:` 那一行与它表里写的对不上就当场停
+  ——⚠ `pdfeditor` 用的是 **word** 那一份，按应用名是推不出来的。
+- `initializeOnlyOffice(documentType?)` 收下文档类型，把预热 iframe 指到对应那一份。
+  `OnlyOfficeManager` 那三个调用点都传了，所以预热在取文件之前就开始了。
+  不传时按 word 预热，与 `getDocumentType()` 认不出扩展名时的默认值一致
+  ——⚠ 两处各选各的默认，就会预热 A 而打开 B，多下一份 sdk 而且不报错。
+- ⚠ 生成的页面里 `sdk-all.js` 用的是 `<link rel="preload">`，不是 `<script>`。预热要的是字节进缓存，
+  不是代码跑起来；上游那份是真的在隐藏 iframe 里解析执行 27.5 MB。
+  **这一条必须量，不能推**：预载拿到的字节要是没能给编辑器 iframe 用上，同一个文件会下两遍，
+  **而总字节会涨、不会报错**。实测里 `word/sdk-all.js` 全程只出现一次，由预热 iframe 下
+  （10 个请求 · 31.8 MB），编辑器 iframe 从缓存里拿。
+
+结果：437 请求 · 221.7 MB → 387 请求 · 131.1 MB，首屏 2159 ms → 906 ms。
+
+⚠ **先骗人的是量的工具。** `measure-payload.mjs` 认预热 iframe 是按 `preload.html` 匹配的，
+改名之后它的请求**静静地并进了编辑器 iframe 那一行**，「预热到底有没有在干活」这一问就此没有读数
+——总数是对的，结构是错的。改成认 `preload(-<应用>)?.html`。
+
+### 改动二：把预压缩副本发出去（省 72.6 MB）
+
+这棵树发出去的字节一直是没压过的，因为**两半都关着**，各有各的理由，而且从任一侧都看不见另一侧：
+
+- 镜像里每个文件旁边都有一份 `.gz`——9759 个，**245 个字体文件一个不落**，在源容器上数过。
+  `scripts/extract-assets.mjs` 把它们全删了，写的理由是「没有静态服务器会去读这些」。
+  那句话是错的：nginx 的 `gzip_static on` 读的就是这些。
+- 装上去之后前面那台 web 服务器一条压缩配置都没有，而 nginx 默认的 `gzip_types` 只有 `text/html`
+  ——就算继承到一条 `gzip on`，也压不到 JavaScript 与字体。
+
+⚠ **两半都关着的时候，谁看都正常**：页面能开、缓存生效、请求数正常。
+唯一的症状是冷载字节数是该有的两倍，而那个数平时没人盯。
+
+现在换成：
+
+- `scripts/precompress.mjs` 给 `vendor/` 里每个大于 1 KB 的文件配一份 `.gz`（已经是压缩格式的跳过；
+  ⚠ **字体那些文件根本没有扩展名，而它们是最大的一族**，所以判据是扩展名黑名单，不是白名单）。
+  增量跑；压完不比原文件小的那一份直接不留——留着等于发更多字节，而两边都回 200。
+  `scripts/make-release.mjs` 在拷 `vendor/` 之前先跑它，所以发布包里一定带着。
+- `demo/server/index.mjs` 与 `embed-poc/server/static-server.mjs` 在对方收得下 gzip 时发那一份，
+  判据与 nginx 一样，包括「比源文件旧的那一份不认」。
+  ⚠ `content-type` 取的是**原文件**的扩展名；取 `.gz` 的话每个文件都变成 `application/gzip`，
+  于是脚本不执行、wasm 拒收，**而响应码仍然是 200**。
+- 前面有 web 服务器时：`gzip_static on; gzip_vary on;`。
+  ⚠ `gzip_static` 不受 `gzip_types` 管——正因为如此它才盖得住那些没有扩展名的字体文件。
+
+实测压缩比（镜像自带那份与我们现配的，差不到一个百分点）：
+
+| 文件 | 原始 | gzip |
+|---|---|---|
+| `sdkjs/word/sdk-all.js` | 27.53 MB | 4.49 MB（16%） |
+| `sdkjs/word/sdk-all-min.js` | 3.36 MB | 0.61 MB（18%） |
+| `documenteditor/main/code.js` | 2.20 MB | 0.32 MB（14%） |
+| `sdkjs/common/libfont/engine/fonts.wasm` | 3.45 MB | 1.36 MB（40%） |
+| `fonts/070`（微软雅黑 Regular） | 18.79 MB | 11.86 MB（63%） |
+| 整棵树里大于 1 KB 的那一批 | 985.9 MB | 440.9 MB（45%） |
+
+结果：131.1 MB → 58.5 MB。配一遍要 33 秒，盘上那棵树翻一倍。
+
+### 还剩什么
+
+| 组别 | 冷载字节 | 占比 |
+|---|---|---|
+| 字体 | 48.2 MB | **82%** |
+| sdkjs | 5.2 MB | 9% |
+| 界面外壳 | 1.7 MB | 3% |
+| 插件 | 0.9 MB | 1% |
+| 其他（多数是 dev 服务器自己那些模块，构建产物里没有） | 2.6 MB | 4% |
+
+中文字体只压得掉四成上下，于是现在占了冷载的五分之四。给它们做子集、或者换成 OFL 的字体再做子集，
+是剩下唯一的大头——而那同时是个许可问题：微软雅黑 / 宋体 / 黑体 / 仿宋与第 3.1 节里那套 Monotype Arial 是同一类。
+**这一步没做**：它要先定「哪些字可以掉」，还要有一条能让掉字当场看得见的判据。
+另外记住字体是缓存一年的，这一档只关系到第一次打开。
+
+### 判据（B17、B18），以及它们真会咬人的证明
+
+`npm run e2e` 多了两条。它们守的都是**别的东西不会察觉其消失**的那种省：谁把预热 iframe 指回 `preload.html`，
+或者哪次部署不再发 `.gz`，页面照样全好，别的断言一条都不会红。
+
+- **B17** 断言开 docx 时预热的是 `preload-documenteditor.html`，且 `cell` / `slide` / `visio` 的 sdk 一个请求都没有。
+  ⚠ 那几条是否定断言，所以它同时断言 **`word/sdk-all.js` 请求过**——一条免费探针：
+  地址匹配要是写错了，三条否定全是恒真的，而这一条会当场红。
+- **B18** 同一条地址只换 `Accept-Encoding` 取两次，断言压过那份更小、带 `content-encoding: gzip` 与
+  `vary: accept-encoding`，且 `content-type` 没变。它验一个脚本和一个字体文件，因为没有扩展名的正是字体那一批。
+
+**两条都靠注入缺陷验过**：把预载页名改回 `preload.html`，服务器带 `OOW_NO_PRECOMPRESSED=1` 起。
+B17 与 B18 当场红，另外 17 条全绿。验完还原，字节核对一致。

@@ -222,9 +222,18 @@ function disableServiceWorkers(destDir) {
 }
 
 /**
- * nginx 那份预压缩副本（每个文件旁边一个 .gz）对我们没用——静态服务器要么自己压，
- * 要么不压，没有一个会去读这些。默认删掉，能省掉将近一半体积。
- * 想留着就加 --keep-gz。**删了多少要打出来，不能悄悄少东西。**
+ * 镜像里每个文件旁边都有一份 `.gz`（nginx 的预压缩副本，9700 多个）。默认删掉。
+ *
+ * ⚠ **删掉不等于不要压缩。** 这里从前写的理由是「没有静态服务器会去读这些」
+ * ——那句话是错的：nginx 的 `gzip_static on` 读的就是这些。真正的理由是
+ * **在本机现配比带过来划算**：
+ *
+ * - 带过来要多传一趟（整棵树差不多翻倍），而这一趟是走网络从容器里 tar 出来的；
+ * - 镜像那份**只覆盖镜像里有的文件**，我们后处理生成的那几份（`api.js`、
+ *   `plugins.json`、按类型分开的预载页）它一份都没有。
+ *
+ * 所以配压缩副本是单独一步：`node scripts/precompress.mjs`（装配发布包时自动跑）。
+ * 想直接留镜像那一份就加 `--keep-gz`。**删了多少要打出来，不能悄悄少东西。**
  */
 function dropGzDuplicates(destDir) {
   if (KEEP_GZ) {
@@ -238,6 +247,20 @@ function dropGzDuplicates(destDir) {
   );
   bash(`find ${JSON.stringify(d)} -name '*.gz' -type f -delete`);
   log(`删掉 ${before} 个 nginx 预压缩副本，省 ${(bytes / 1048576).toFixed(0)} MB（要留用 --keep-gz）`);
+}
+
+/**
+ * 生成按编辑器分开的那几份预载页。
+ *
+ * 为什么不直接用上游那份 `preload.html`：它把四个编辑器全预热一遍，与这次开的是什么
+ * 文档无关，一份 docx 的冷载因此多下约 90 MB。完整理由与实测见
+ * `scripts/build-preload-pages.mjs` 的头注释。
+ */
+function buildPreloadPages() {
+  const r = spawnSync(process.execPath, [path.join(ROOT, "scripts/build-preload-pages.mjs")], {
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  if (r.status !== 0) die(`生成按类型分开的预载页失败（退出码 ${r.status}）`);
 }
 
 function writeSourceJson(destDir, imageId, coreVersion) {
@@ -261,6 +284,7 @@ function writeSourceJson(destDir, imageId, coreVersion) {
       "api.js.tpl → api.js（nginx 那一步的替代）",
       "补上 themes.json 与 plugins.json（nginx 那两份，镜像里没有）",
       "关掉 Service Worker 注册",
+      "生成按编辑器分开的预载页 preload-<应用>.html（上游那份 preload.html 原样留着）",
       KEEP_GZ ? "保留 nginx 预压缩副本" : "删掉 nginx 预压缩副本（--keep-gz 可留）",
     ],
     各目录: Object.fromEntries(DIRS.map((d) => [d, du(d)])),
@@ -309,6 +333,7 @@ function main() {
   installApiJs(destDir);
   installRootConfigs(destDir);
   disableServiceWorkers(destDir);
+  buildPreloadPages();
   dropGzDuplicates(destDir);
   const source = writeSourceJson(destDir, imageId, coreVersion);
 

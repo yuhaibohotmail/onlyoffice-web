@@ -197,6 +197,42 @@ function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
 
+/**
+ * 预热哪一个编辑器：文档类型 → 预载页。
+ *
+ * 那几份页面由 `scripts/build-preload-pages.mjs` 生成（⚠ 文件名的拼法在那边也有一份，
+ * 改名要两处一起改；跑一遍 `npm run e2e` 的 B17 会当场红）。
+ *
+ * ⚠ **上游那份 `preload.html` 刻意不再用**：它把四个编辑器全预热一遍，
+ * 与这次要开的是什么文档无关，冷载因此多下约 90 MB（实测 221.7 MB → 141.1 MB）。
+ * 留着那两个字段是因为它们是公开 API，别人可能引着。
+ */
+const PRELOAD_PAGE_BY_DOCUMENT_TYPE: Record<DocumentType, string> = {
+  [DocumentType.Word]: "preload-documenteditor.html",
+  [DocumentType.Cell]: "preload-spreadsheeteditor.html",
+  [DocumentType.Slide]: "preload-presentationeditor.html",
+  [DocumentType.Draw]: "preload-visioeditor.html",
+  [DocumentType.Pdf]: "preload-pdfeditor.html",
+};
+
+/**
+ * 这次该预热哪一份，返回站点相对路径。
+ *
+ * ⚠ 不传文档类型时按 Word 算，与 `getDocumentType()` 认不出扩展名时的默认值一致
+ * ——两处要是各选各的默认，认不出扩展名的文档会预热 A 而实际打开 B，
+ * **多下一份 SDK，而且没有任何东西报错**。
+ */
+export function getOnlyOfficePreloadPage(documentType?: DocumentType): string {
+  const type = documentType ?? DocumentType.Word;
+  const page = PRELOAD_PAGE_BY_DOCUMENT_TYPE[type] ?? PRELOAD_PAGE_BY_DOCUMENT_TYPE[DocumentType.Word];
+  return `/web-apps/apps/api/documents/${page}`;
+}
+
+/** 同上，拼成能直接放进 iframe 的地址。 */
+export function getOnlyOfficePreloadUrl(documentType?: DocumentType): string {
+  return getStaticResource().onlyoffice.root + getOnlyOfficePreloadPage(documentType);
+}
+
 function buildStaticResource(): StaticResource {
   const apiJs = "/web-apps/apps/api/documents/api.js";
   const preloadHtml = "/web-apps/apps/api/documents/preload.html";

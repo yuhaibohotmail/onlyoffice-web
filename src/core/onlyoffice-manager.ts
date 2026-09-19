@@ -9,6 +9,7 @@ import {
   ONLYOFFICE_EVENT_KEYS,
   ONLYOFFICE_LANG_KEY,
   OFFICE_THEME,
+  getDocumentType,
   registerOnlyOfficeStaticResource,
   resetOnlyOfficeStaticResource,
   type FileType,
@@ -40,6 +41,7 @@ import type { User } from "../internal/editor/types";
 import {
   EditorManager,
   editorManagerFactory,
+  getFileType,
   type OnlyOfficeEditorVariant,
   type OnlyOfficePluginsConfig,
 } from "./editor-manager";
@@ -164,7 +166,8 @@ export class OnlyOfficeManager {
     options: OnlyOfficeManagerOptions,
   ): Promise<OnlyOfficeManager> {
     const containerId = options.containerId ?? ONLYOFFICE_ID;
-    await initializeOnlyOffice();
+    // 文档类型要在这儿就交出去：预热的是**这一种**文档的 SDK，交晚了就只剩四选一或者不预热。
+    await initializeOnlyOffice(getDocumentType(getFileType(options.defaultFileName)));
 
     const editor = editorManagerFactory.get(containerId);
     const manager = new OnlyOfficeManager(editor, { ...options, containerId });
@@ -186,7 +189,7 @@ export class OnlyOfficeManager {
     file: File,
   ): Promise<OnlyOfficeManager> {
     const containerId = options.containerId ?? ONLYOFFICE_ID;
-    await initializeOnlyOffice();
+    await initializeOnlyOffice(getDocumentType(getFileType(file.name)));
 
     const editor = editorManagerFactory.get(containerId);
     const manager = new OnlyOfficeManager(editor, { ...options, containerId });
@@ -422,7 +425,7 @@ export class OnlyOfficeManagerFactory {
     let manager = this.managers.get(containerId);
 
     if (!manager) {
-      await initializeOnlyOffice();
+      await initializeOnlyOffice(getDocumentType(getFileType(document.fileName)));
       const editor = editorManagerFactory.get(containerId);
       manager = OnlyOfficeManager.fromEditor(editor, {
         ...options,

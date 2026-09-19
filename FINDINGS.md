@@ -459,6 +459,9 @@ So when the real download-size problems are ranked, they come in this order, **w
 3. **Both the unminified and the minified versions** of the same sdk are downloaded (`sdk-all.js` 27.5 MB + `sdk-all-min.js` 3.4 MB)
 4. Application shell + plugin panel ≈ 10 MB ← **this is the only item the viewer can save**
 
+> Items 1 and 3 have since been fixed, and the whole tree is now served compressed: a cold load is **58.5 MB**,
+> not 221.7 MB. The numbers in this section are the "before" measurement — see §15 for what changed and what is left.
+
 **So the value of this mode has to be described differently**: what it saves is not bytes (4.4%), but
 **265 fewer requests, no editing entry points, and no plugin panel** —
 for a host application that embeds a read-only document, what goes away is that whole interactive surface, not traffic.
@@ -514,3 +517,154 @@ B16 failed immediately at item 1 (`查看器那档没落在 documenteditor/embed
 a separate measurement showed that at that point the viewer mode had 2 plugin panels and 13 ribbon tabs
 — **which means item 3 on its own is also enough to catch this regression**, rather than depending on item 1 to cover it.
 Restored after verification, bytes verified identical.
+
+## 15. Cold load cut from 221.7 MB to 58.5 MB, in two changes
+
+Section 14 measured where the bytes go but stopped at ranking them. This section is the fix, and both halves are
+measured the same way (`node scripts/measure-payload.mjs`, document 1, the Chinese lesson-plan docx, editor mode,
+cold load, same machine, same run).
+
+| | Requests | Bytes | First paint |
+|---|---|---|---|
+| Before | 437 | **221.7 MB** | 2159 ms |
+| After warming up one editor instead of four | 387 | **131.1 MB** | 906 ms |
+| After also serving the compressed copies | 387 | **58.5 MB** | 840 ms |
+
+Warm load is unchanged at 91 KB — the long-lived cache was already working, and none of this is about that column.
+
+### Where the bytes actually were
+
+| Rank | File | Cold-load bytes | What it is | Needed for a docx? |
+|---|---|---|---|---|
+| 1 | `sdkjs/cell/sdk-all.js` | 30.9 MB | spreadsheet engine | **no** |
+| 2 | `sdkjs/word/sdk-all.js` | 27.5 MB | word engine | yes |
+| 3 | `sdkjs/slide/sdk-all.js` | 27.0 MB | presentation engine | **no** |
+| 4 | `sdkjs/visio/sdk-all.js` | 22.7 MB | visio engine | **no** |
+| 5 | `fonts/070` | 18.8 MB | Microsoft YaHei Regular | declared by the document |
+| 6 | `fonts/076` | 17.5 MB | SimSun / NSimSun | declared by the document |
+| 7 | `fonts/071` | 16.1 MB | Microsoft YaHei Bold | declared by the document |
+| 8 | `fonts/073` | 10.1 MB | FangSong | declared by the document |
+| 9 | `fonts/074` | 9.3 MB | SimHei | declared by the document |
+| 10 | `sdkjs/common/libfont/engine/fonts.wasm` | 3.4 MB | font rasteriser | yes |
+| 11 | `sdkjs/word/sdk-all-min.js` | 3.4 MB | bootstrap bundle | yes |
+| 12–14 | `cell` / `slide` / `visio` `sdk-all-min.js` | 8.3 MB | their bootstraps | **no** |
+| 15 | `documenteditor/main/code.js` | 2.2 MB | application shell | yes |
+| 16–19 | four `main/resources/css/app.css` | 2.3 MB | shells' styles | one of them |
+
+Two families are 81% of the total: four editor engines at 108.1 MB and five Chinese fonts at 71.8 MB.
+
+The fonts are **driven by the document, and downloaded whole**. `demo/fixtures/lesson-plan-zh.docx` declares
+微软雅黑 / 宋体 / 黑体 / 仿宋 / Calibri, and exactly those five files come down: a 3 KB document pulls 71.8 MB of fonts.
+There is no glyph subsetting anywhere in this pipeline — the whole TTF goes into the rasteriser.
+
+### Change 1 — warm up one editor, not four (−90.6 MB)
+
+⚠ **`sdk-all-min.js` is not a minified `sdk-all.js`; it is a bootstrap.** In `sdkjs/word/sdk-all-min.js` (line 34497)
+`loadSdk()` loads the full `sdk-all.js` on top of the bootstrap **unless `window['AscNotLoadAllScript']` is set**.
+Only `preload.html` and `cache-scripts.html` set that flag, so every editor load pulls its engine.
+
+**Verified by injecting the flag** into `documenteditor/main/index.html`: the editor never became ready
+(`page.waitForFunction: Timeout 120000ms exceeded`). So the 27.5 MB engine is mandatory, and the waste is not
+"the unminified copy" — it is **the three editors this document does not use**.
+
+Before mounting the editor, the component inserts a hidden warm-up iframe pointing at upstream's `preload.html`,
+which pulls all four engines, all four bootstraps and all four application shells, regardless of what is being opened.
+
+What now happens instead:
+
+- `scripts/build-preload-pages.mjs` generates one page per editor application
+  (`preload-documenteditor.html`, `preload-spreadsheeteditor.html`, `preload-presentationeditor.html`,
+  `preload-visioeditor.html`, `preload-pdfeditor.html`). Upstream's `preload.html` is left untouched on disk.
+  The generator reads each application's `app.js` and refuses to run if the `sdk:` line disagrees with its table
+  — ⚠ `pdfeditor` uses the **word** sdk, which is not derivable from the application name.
+- `initializeOnlyOffice(documentType?)` takes the document type and points the warm-up iframe at the matching page.
+  All three call sites in `OnlyOfficeManager` pass it, so warming starts before the document is even fetched.
+  With no argument it warms word, matching what `getDocumentType()` already returns for an unrecognised extension
+  — ⚠ two different defaults here would warm A while opening B, download a second sdk, and raise no error.
+- ⚠ In the generated pages `sdk-all.js` is a `<link rel="preload">`, not a `<script>`. Warming needs the bytes in the
+  cache, not the code running; upstream's page really does parse and execute 27.5 MB in a hidden iframe.
+  **This had to be measured, not assumed**: if those preloaded bytes were not reused by the editor iframe, the same
+  file would be fetched twice and **the total would go up silently**. In the trace `word/sdk-all.js` appears exactly
+  once, fetched by the warm-up iframe (10 requests · 31.8 MB) and served from cache to the editor iframe.
+
+Result: 437 requests · 221.7 MB → 387 requests · 131.1 MB, first paint 2159 ms → 906 ms.
+
+⚠ **The measuring tool lied first.** `measure-payload.mjs` classified the warm-up iframe by matching `preload.html`,
+so after the rename its requests were **silently folded into the editor-iframe row** and the "who is downloading"
+table lost the one line that answers "is warming up doing anything at all". The total was right; the structure was not.
+Fixed to match `preload(-<app>)?.html`.
+
+### Change 2 — serve the compressed copies (−72.6 MB)
+
+Nothing in this tree was compressed on the wire, because **both halves of the mechanism were off**, each for its
+own reason, and neither is visible from the other:
+
+- The image ships a `.gz` next to every file — 9759 of them, **including all 245 font files**, verified in the
+  source container. `scripts/extract-assets.mjs` deleted all of them, and the stated reason was
+  "no static server reads these". That is wrong: nginx's `gzip_static on` reads exactly those.
+- The web server in front of the deployed tree had no compression configured, and nginx's default `gzip_types`
+  is `text/html` only — so even an inherited `gzip on` would not have covered the JavaScript or the fonts.
+
+⚠ **With both halves off, everything looks fine**: pages open, caching works, request counts are normal.
+The only symptom is that the cold-load byte count is twice what it should be, and nobody watches that number.
+
+What now happens:
+
+- `scripts/precompress.mjs` writes a `.gz` next to every file over 1 KB in `vendor/` (skipping formats that are
+  already compressed; ⚠ **the font files have no extension at all and are the single biggest group**, so the rule is
+  an extension deny-list, not an allow-list). It is incremental, and it deletes any copy that did not come out
+  smaller — keeping one would mean sending *more* bytes while both responses still return 200.
+  `scripts/make-release.mjs` runs it before copying `vendor/`, so a release package always ships them.
+- `demo/server/index.mjs` and `embed-poc/server/static-server.mjs` serve that copy when the client accepts gzip —
+  the same rule nginx applies, including refusing a `.gz` older than its source.
+  ⚠ `content-type` comes from the **original** file's extension; taking it from the `.gz` turns every file into
+  `application/gzip`, and scripts then do not execute and wasm is rejected **while the status code stays 200**.
+- For a server in front of the tree: `gzip_static on; gzip_vary on;`.
+  ⚠ `gzip_static` is not governed by `gzip_types`, which is what makes it cover the extension-less font files.
+
+Measured ratios (the image's own copies and ours agree to within a percent):
+
+| File | Original | gzip |
+|---|---|---|
+| `sdkjs/word/sdk-all.js` | 27.53 MB | 4.49 MB (16%) |
+| `sdkjs/word/sdk-all-min.js` | 3.36 MB | 0.61 MB (18%) |
+| `documenteditor/main/code.js` | 2.20 MB | 0.32 MB (14%) |
+| `sdkjs/common/libfont/engine/fonts.wasm` | 3.45 MB | 1.36 MB (40%) |
+| `fonts/070` (Microsoft YaHei Regular) | 18.79 MB | 11.86 MB (63%) |
+| whole tree, files over 1 KB | 985.9 MB | 440.9 MB (45%) |
+
+Result: 131.1 MB → 58.5 MB. Compressing the tree takes 33 seconds and doubles it on disk.
+
+### What is left
+
+| Group | Cold-load bytes | Share |
+|---|---|---|
+| Fonts | 48.2 MB | **82%** |
+| sdkjs | 5.2 MB | 9% |
+| Application shell | 1.7 MB | 3% |
+| Plugins | 0.9 MB | 1% |
+| Other (mostly the dev server's own modules, absent in a build) | 2.6 MB | 4% |
+
+Chinese fonts only compress by about 40%, so they are now four fifths of a cold load. Subsetting them, or replacing
+them with an OFL family and subsetting that, is the only remaining large win — and it is also a licensing question,
+since Microsoft YaHei / SimSun / SimHei / FangSong are in the same category as the Monotype Arial found in §3.1.
+**Not done here**: it needs a decision about which characters may be dropped, and a test that makes a missing glyph
+visible. Note that fonts are cached for a year, so this is about the first visit only.
+
+### Checks (B17, B18), and the proof that they bite
+
+`npm run e2e` grew two entries. Both guard savings that **nothing else would notice disappearing**: if someone points
+the warm-up iframe back at `preload.html`, or a deployment stops serving the `.gz` copies, every page still works and
+every other assertion stays green.
+
+- **B17** asserts the warm-up iframe is `preload-documenteditor.html` when opening a docx, and that `cell`, `slide`
+  and `visio` sdk files were never requested. ⚠ Those are negative assertions, so it also asserts that
+  **`word/sdk-all.js` was requested** — a free probe: if the URL matching were wrong, all three negatives would be
+  vacuously true, and this one would fail instead.
+- **B18** requests the same URL twice, changing only `Accept-Encoding`, and asserts the gzip response is smaller,
+  carries `content-encoding: gzip` and `vary: accept-encoding`, and that `content-type` is unchanged. It checks a
+  script and a font file, because the font files are the ones with no extension.
+
+**Both were verified by injecting the defect**: the preload page names were reverted to `preload.html` and the server
+was started with `OOW_NO_PRECOMPRESSED=1`. B17 and B18 failed and the other 17 entries stayed green. Restored
+afterwards, bytes verified identical.

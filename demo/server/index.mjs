@@ -275,16 +275,57 @@ function requireSession(req, docId, needScope) {
 
 // ── 静态 ──────────────────────────────────────────────────────────────────
 
-function serveFile(res, file, cacheable) {
+/**
+ * 关掉「发预压缩副本」那一档：`OOW_NO_PRECOMPRESSED=1`。
+ *
+ * 留这个开关只为一件事：**量「不压是多少」时要有对照组**。
+ * 没有它的话，压缩前后两个数就得靠删 `.gz` 再配回来才比得了，
+ * 而那中间任何一次手滑都会变成「量到的是第三种状态」。
+ */
+const 不发预压缩副本 = process.env.OOW_NO_PRECOMPRESSED === "1";
+
+/**
+ * 发一个文件；旁边配着 `.gz` 而且对方收得下压缩的，就发那一份。
+ *
+ * 这是 nginx `gzip_static on` 的等价物——**判据也一样**：只看旁边那份在不在，
+ * 不现压。那几份由 `node scripts/precompress.mjs` 配。
+ *
+ * ⚠ **`content-type` 取的是原文件的扩展名，不是 `.gz` 的**。取错的话
+ * 每个文件都变成 `application/gzip`：浏览器不执行脚本、wasm 那条直接拒收，
+ * 而**响应码仍然是 200**。
+ * ⚠ `vary: accept-encoding` 一律带上，压没压都带：中间那层缓存少了这一条，
+ * 会把压过的那份发给收不下压缩的人。
+ */
+function serveFile(req, res, file, cacheable) {
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) return text(res, 404, "not found");
+
+    let 发的 = file;
+    let 长度 = st.size;
+    let 编码 = null;
+    if (!不发预压缩副本 && /\bgzip\b/.test(String(req.headers["accept-encoding"] || ""))) {
+      try {
+        const gz = fs.statSync(file + ".gz");
+        // 比源文件旧的那一份不认——源文件换过而 .gz 没重配时，发出去的会是上一版的内容。
+        if (gz.isFile() && gz.mtimeMs >= st.mtimeMs) {
+          发的 = file + ".gz";
+          长度 = gz.size;
+          编码 = "gzip";
+        }
+      } catch {
+        // 没配那一份，照原样发。
+      }
+    }
+
     res.writeHead(200, {
       "content-type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream",
-      "content-length": st.size,
+      "content-length": 长度,
+      ...(编码 ? { "content-encoding": 编码 } : {}),
+      vary: "accept-encoding",
       // SDK 是带版本号的不可变资源，真部署一定是长缓存；别的都不缓存。
       "cache-control": cacheable ? "public, max-age=31536000, immutable" : "no-store",
     });
-    fs.createReadStream(file).pipe(res);
+    fs.createReadStream(发的).pipe(res);
   });
 }
 
@@ -536,14 +577,14 @@ const server = http.createServer(async (req, res) => {
       const name = p.slice("/legal/".length);
       const src = LEGAL_FILES[name];
       if (!src) return text(res, 404, "not found");
-      return serveFile(res, src, false);
+      return serveFile(req, res, src, false);
     }
 
     // —— 静态：插件 ——
     if (p.startsWith("/plugins/")) {
       const f = under(PLUGIN_DIR, p.slice("/plugins/".length));
       if (!f) return text(res, 403, "forbidden");
-      return serveFile(res, f, false);
+      return serveFile(req, res, f, false);
     }
 
     // —— 静态：SDK ——
@@ -563,16 +604,16 @@ const server = http.createServer(async (req, res) => {
       if (p.startsWith(X2T_PREFIX)) {
         const f = under(X2T_DIR, p.slice(X2T_PREFIX.length));
         if (!f) return text(res, 403, "forbidden");
-        return serveFile(res, f, true);
+        return serveFile(req, res, f, true);
       }
       if (p.startsWith(X2T_FONTS_PREFIX)) {
         const f = under(X2T_FONTS_DIR, p.slice(X2T_FONTS_PREFIX.length));
         if (!f) return text(res, 403, "forbidden");
-        return serveFile(res, f, true);
+        return serveFile(req, res, f, true);
       }
       const f = under(SDK_ROOT, p.slice("/packages/".length));
       if (!f) return text(res, 403, "forbidden");
-      return serveFile(res, f, true);
+      return serveFile(req, res, f, true);
     }
 
     // —— 测试用：把 1 号文档复位成种子那一版 ——

@@ -16,6 +16,7 @@
  * 不是一回事，混成一个码的话，人看到红会去查被测的东西，而该查的是自己那条命令。
  */
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -760,6 +761,107 @@ async function main() {
     return {
       编辑器: { 入口: e.落点.split("?")[0].split("/").slice(-3).join("/"), 纸张: e.纸张, 内容: e.内容, 插件面板: e.插件iframe, 标签页: e.标签页 },
       查看器: { 入口: v.落点.split("?")[0].split("/").slice(-3).join("/"), 纸张: v.纸张, 内容: v.内容, 插件面板: v.插件iframe, 标签页: v.标签页, body类: v.body类 },
+    };
+  });
+
+  // ── B17 预热的是**这一种**文档的编辑器，不是四个一起 ──────────────────────
+  //
+  // 组件挂编辑器之前先塞一个隐藏 iframe 去预热缓存。上游那份 `preload.html`
+  // 把四个编辑器全预热一遍（word / cell / slide / visio 的 `sdk-all.js` 各 22–31 MB），
+  // 与这次开的是什么文档无关；换成按类型分开的那几份之后，一份 docx 的冷载
+  // 从 221.7 MB 降到 131.1 MB。
+  //
+  // ⚠ 这条守的是**「省下来的那 90 MB 别悄悄回来」**。谁把 `initialize.ts` 改回指
+  // `preload.html`，页面照样全好、e2e 别的条目一条都不会红，只是每次冷载多下 90 MB。
+  //
+  // ③ 那条「没请求过另外三个」是反向断言，**必须配一条对照组**：
+  //    word 那一份要是也没请求过，说明我这个地址匹配写错了，三条否定断言全是恒真的。
+  await step("B17 只预热这一种文档的编辑器（另外三个的 sdk 一个字节都没下；word 那份下了——对照组）", async () => {
+    const 请求过 = [];
+    const p = await ctx.newPage();
+    try {
+      p.on("request", (r) => 请求过.push(r.url()));
+      await p.goto(WEB_ORIGIN + "/", { waitUntil: "domcontentloaded" });
+      await p.waitForFunction(() => window.__pocReady === true, null, { timeout: 30000 });
+      await p.evaluate(() => window.__poc.openFromServer(1));
+      await waitEditorPainted(p);
+      // 预热是并行发生的，画出来之后再等一会儿，免得把「还没请求」读成「不请求」。
+      await p.waitForTimeout(6000);
+
+      const 预热页 = await p.$$eval("iframe[data-onlyoffice-preload]", (fs2) =>
+        fs2.map((f) => f.getAttribute("data-onlyoffice-preload")));
+
+      const 有 = (re) => 请求过.some((u) => re.test(u));
+
+      must(预热页.length === 1, "预热 iframe 有 " + 预热页.length + " 个，应当只有一个：" + 预热页.join(" "));
+      must(/preload-documenteditor\.html$/.test(预热页[0]),
+        "开 docx 时预热的不是 documenteditor 那一份：" + 预热页[0]);
+
+      // 对照组（免费探针）：word 那一份必须真的下过，否则下面三条恒真。
+      must(有(/\/sdkjs\/word\/sdk-all\.js(\?|$)/),
+        "对照组塌了：连 word 的 sdk-all.js 都没请求过——地址匹配写错了，下面三条断言恒真");
+
+      for (const 谁 of ["cell", "slide", "visio"]) {
+        must(!有(new RegExp("/sdkjs/" + 谁 + "/sdk-all\\.js(\\?|$)")),
+          "开 docx 时竟然下了 " + 谁 + " 的 sdk-all.js——预热又变回四个一起了");
+        must(!有(new RegExp("/sdkjs/" + 谁 + "/sdk-all-min\\.js(\\?|$)")),
+          "开 docx 时竟然下了 " + 谁 + " 的 sdk-all-min.js");
+      }
+      // 上游那份整页预热的也不该再被请求。⚠ 这个正则不能写成 `preload\.html`
+      // 之外的形状，否则会顺带匹配到 `preload-documenteditor.html`，于是恒假。
+      must(!有(/\/documents\/preload\.html(\?|$)/), "还在请求上游那份 preload.html（四个编辑器一起预热的那一份）");
+
+      return { 预热页: 预热页[0], 请求数: 请求过.length };
+    } finally {
+      await p.close();
+    }
+  });
+
+  // ── B18 发出去的是压过的字节 ──────────────────────────────────────────────
+  //
+  // `scripts/precompress.mjs` 在每个大文件旁边配一份 `.gz`，发文件那一头
+  // （本项目后端 / 真部署上的 nginx `gzip_static on`）看见就发那一份。
+  //
+  // ⚠ **同一条请求只换 `Accept-Encoding` 比两次**，不是比两个不同的文件——
+  // 比两个文件的话，「压缩生效」与「这俩文件本来就不一样大」分不开。
+  // ⚠ 还要验 `content-type` 没被 `.gz` 带歪：带歪了浏览器不执行脚本、wasm 拒收，
+  // 而**响应码仍然是 200**。
+  await step("B18 预压缩副本真的发出去了（同一条请求只换 Accept-Encoding，字节小一截而类型不变）", async () => {
+    const 取 = (路径, 收压缩的) => new Promise((resolve, reject) => {
+      const r = http.request(
+        API + 路径,
+        { headers: 收压缩的 ? { "accept-encoding": "gzip" } : { "accept-encoding": "identity" } },
+        (res) => {
+          let n = 0;
+          res.on("data", (c) => { n += c.length; });
+          res.on("end", () => resolve({ 码: res.statusCode, 头: res.headers, 字节: n }));
+        },
+      );
+      r.on("error", reject);
+      r.end();
+    });
+
+    const 量一个 = async (路径, 该是什么类型) => {
+      const 压的 = await 取(路径, true);
+      const 原样的 = await 取(路径, false);
+      must(压的.码 === 200 && 原样的.码 === 200, 路径 + " 没回 200：" + 压的.码 + " / " + 原样的.码);
+      must(压的.头["content-encoding"] === "gzip", 路径 + " 收得下 gzip 却没发压缩的那一份");
+      must(!原样的.头["content-encoding"], 路径 + " 对方收不下压缩，却还是发了压缩的那一份");
+      must(/accept-encoding/i.test(String(压的.头["vary"] || "")),
+        路径 + " 少了 vary: accept-encoding——中间那层缓存会把压过的发给收不下的人");
+      must(String(压的.头["content-type"] || "").startsWith(该是什么类型),
+        路径 + " 的 content-type 被 .gz 带歪了：" + 压的.头["content-type"]);
+      must(压的.字节 < 原样的.字节 * 0.9,
+        路径 + " 压完没小多少（" + 压的.字节 + " / " + 原样的.字节 + "）——那一份可能没配上");
+      return { 路径, 压的: 压的.字节, 原样的: 原样的.字节 };
+    };
+
+    const 前缀 = "/packages/onlyoffice/" + SDK_VERSION;
+    return {
+      // 脚本：类型必须还是 javascript
+      sdk: await 量一个(前缀 + "/sdkjs/word/sdk-all.js", "application/javascript"),
+      // ⚠ 字体那 245 个文件**没有扩展名**，正是最该压的一批；类型仍是 octet-stream
+      字体: await 量一个(前缀 + "/fonts/070", "application/octet-stream"),
     };
   });
 

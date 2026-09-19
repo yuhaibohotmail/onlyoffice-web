@@ -218,6 +218,10 @@ await initializeOnlyOffice();
 - Singleton: multiple calls initialize only once
 - Called automatically inside `OnlyOfficeManager.create` / `EditorManager.create`
 - An explicit call is only needed in advanced scenarios such as manual `fromEditor` binding
+- It takes an optional document type: `initializeOnlyOffice(DocumentType.Cell)`. It decides **which editor's
+  bundles are warmed up** in the hidden frame before the editor mounts. With no argument it warms the word
+  editor, matching what `getDocumentType()` returns for an unrecognised extension. Passing the wrong type is
+  not an error — it just warms the wrong bundles, and the editor downloads its own afterwards.
 
 ### Creating the Editor View
 
