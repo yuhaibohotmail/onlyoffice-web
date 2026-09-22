@@ -1275,12 +1275,15 @@ export class EditorManager {
         comments: { disable: false, previewMode: disabled },
         chat: false,
         review: true,
-        viewport: disabled,
+        viewport: disabled && !this.keepViewControls,
         documentHolder: { clear: disabled, disable: true },
         toolbar: maskToolbar,
         header: { search: false },
         shortcuts: disabled ? false : undefined,
       });
+      if (disabled && this.keepViewControls) {
+        this.ensureViewControlsUsable();
+      }
       return;
     }
 
@@ -1305,13 +1308,17 @@ export class EditorManager {
           comments: { disable: false, previewMode: true },
           chat: false,
           review: true,
-          viewport: true,
+          // viewport:true 会连带影响视图区；保留缩放时不要锁
+          viewport: !this.keepViewControls,
           documentHolder: { clear: true, disable: true },
           toolbar: maskToolbar,
           protect: true,
           header: { search: false, startfill: false },
           shortcuts: false,
         });
+        if (this.keepViewControls) {
+          this.ensureViewControlsUsable();
+        }
       } else {
         nc.trigger("editing:disable", false, {
           viewMode: false,
@@ -1364,6 +1371,121 @@ export class EditorManager {
       documentHolder: { clear: false, disable: true },
       toolbar: maskToolbar,
     });
+    if (disabled && this.keepViewControls) {
+      this.ensureViewControlsUsable();
+    }
+  }
+
+  /**
+   * 去掉 toolbar-mask，并解锁 View 页缩放控件（disableOnStart / SetDisabled）。
+   * editing:disable 即使 toolbar:false，别处仍可能留下 mask 或把 ViewTab 锁死。
+   */
+  private ensureViewControlsUsable() {
+    if (!this.keepViewControls) {
+      return;
+    }
+
+    const win = this.getEditorFrameWindow() as
+      | (OnlyOfficeIframeWindow & {
+          $?: (sel: string) => {
+            remove?: () => void;
+            length?: number;
+          };
+          DE?: {
+            getController?: (name: string) => {
+              SetDisabled?: (state: boolean) => void;
+              view?: { lockedControls?: unknown[] };
+            };
+          };
+          PDFE?: {
+            getController?: (name: string) => {
+              SetDisabled?: (state: boolean) => void;
+            };
+          };
+          PE?: {
+            getController?: (name: string) => {
+              SetDisabled?: (state: boolean) => void;
+            };
+          };
+          SSE?: {
+            getController?: (name: string) => {
+              SetDisabled?: (state: boolean) => void;
+            };
+          };
+          Common?: {
+            Utils?: {
+              lockControls?: (
+                lock: unknown,
+                state: boolean,
+                opts: { array: unknown },
+              ) => void;
+            };
+            enumLock?: { disableOnStart?: unknown; lostConnect?: unknown };
+          };
+        })
+      | undefined;
+    if (!win) {
+      return;
+    }
+
+    try {
+      win.$?.(".toolbar-mask")?.remove?.();
+      win.$?.(".toolbar-group-mask")?.remove?.();
+      win.$?.(".toolbar.masked")?.remove?.(); // no-op if wrong API
+      const toolbar = win.document?.querySelector(".toolbar.masked");
+      toolbar?.classList.remove("masked");
+      win.document
+        ?.querySelectorAll(".toolbar-mask, .toolbar-group-mask")
+        .forEach((el) => el.remove());
+    } catch {
+      // ignore
+    }
+
+    try {
+      const viewTab =
+        win.DE?.getController?.("ViewTab") ??
+        win.PDFE?.getController?.("ViewTab") ??
+        win.PE?.getController?.("ViewTab") ??
+        win.SSE?.getController?.("ViewTab");
+      viewTab?.SetDisabled?.(false);
+      const locks = viewTab?.view?.lockedControls;
+      if (locks && win.Common?.Utils?.lockControls) {
+        const disableOnStart = win.Common.enumLock?.disableOnStart;
+        if (disableOnStart !== undefined) {
+          win.Common.Utils.lockControls(disableOnStart, false, {
+            array: locks,
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /** 按配置强制套用缩放；localStorage 常在 DocEditor 创建后才可读，必须在 documentReady 再调一次。 */
+  private applyConfiguredZoom() {
+    const api = this.getSdkApi() as
+      | {
+          zoomFitToWidth?: () => void;
+          zoomFitToPage?: () => void;
+          zoom?: (percent: number) => void;
+        }
+      | undefined;
+    if (!api) {
+      return;
+    }
+
+    try {
+      if (this.zoom === -2 && api.zoomFitToWidth) {
+        api.zoomFitToWidth();
+      } else if (this.zoom === -1 && api.zoomFitToPage) {
+        api.zoomFitToPage();
+      } else if (this.zoom > 0 && api.zoom) {
+        api.zoom(this.zoom);
+      }
+    } catch {
+      // ignore
+    }
   }
 
   /**
@@ -1742,6 +1864,8 @@ export class EditorManager {
     this.installSlideStructureEditBlocker();
     this.syncEditingRights(false);
     this.suppressLeavePromptForPreview();
+    this.applyConfiguredZoom();
+    this.ensureViewControlsUsable();
 
     if (documentType === DocumentType.Slide) {
       // 工具栏 delayed render 后再锁一次，确保「新增幻灯片」按钮被 DisableToolbar 处理。
@@ -1749,6 +1873,8 @@ export class EditorManager {
         if (this.readOnly) {
           this.syncShellEditingDisable(true, documentType);
           this.suppressLeavePromptForPreview();
+          this.ensureViewControlsUsable();
+          this.applyConfiguredZoom();
         }
       }, 0);
     }
@@ -1757,11 +1883,17 @@ export class EditorManager {
       this.getSdkApi()?.asc_Recalculate?.();
     }
 
-    // 工具栏延迟渲染后可能再次挂上 beforeunload；再清一次。
-    if (this.suppressLeavePrompt) {
-      window.setTimeout(() => this.suppressLeavePromptForPreview(), 0);
-      window.setTimeout(() => this.suppressLeavePromptForPreview(), 500);
-    }
+    // 工具栏延迟渲染后可能再次挂上 beforeunload / mask；再清一次并强制适应宽度。
+    window.setTimeout(() => {
+      this.suppressLeavePromptForPreview();
+      this.ensureViewControlsUsable();
+      this.applyConfiguredZoom();
+    }, 0);
+    window.setTimeout(() => {
+      this.suppressLeavePromptForPreview();
+      this.ensureViewControlsUsable();
+      this.applyConfiguredZoom();
+    }, 400);
   }
 
   /** 语言写在 iframe URL 的 lang 参数里，运行时 refreshFile 不会更新界面语言。 */
@@ -1873,6 +2005,7 @@ export class EditorManager {
             if (documentType === DocumentType.Word) {
               this.scheduleWordDocModeHide();
             }
+            this.applyConfiguredZoom();
           }
         },
         onDocumentStateChange: (event: { data: boolean }) => {
