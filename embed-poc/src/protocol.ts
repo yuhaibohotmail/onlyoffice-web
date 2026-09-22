@@ -73,6 +73,12 @@ export type OpenCommand = {
    */
   baseVersion: number | null;
   lang?: string;
+  /**
+   * 首选开关：view=只读预览，edit=可编辑。
+   * 与 readOnly 同时出现时以本字段为准。
+   */
+  mode?: "view" | "edit";
+  /** 兼容旧字段；等价于 mode:"view"。与 mode 同时出现时以 mode 为准。 */
   readOnly?: boolean;
   /**
    * 【2026-09-17 新增】编辑器界面上给不给下载 / 另存。不给＝允许（与加这一格之前一样）。
@@ -84,6 +90,25 @@ export type OpenCommand = {
    * 开发者工具里照样看得到那次请求。真要防拿走文件，得在后端那一侧想办法。
    */
   allowDownload?: boolean;
+  /**
+   * OnlyOffice customization.zoom：-2=适应宽度，-1=适合页面，或 50–500 百分比。
+   * 不给＝接入页默认 -2（适应宽度）。
+   */
+  zoom?: number;
+  /**
+   * localStorage 里若是「适合页面」(-1)，是否迁成当前 zoom。
+   * 不给时：zoom 为 -2（或未给）则默认迁；其它值默认不迁。
+   */
+  migrateFitPageZoom?: boolean;
+  /**
+   * view 模式下是否抑制 iframe「离开此网站？」提示。不给＝抑制。
+   */
+  suppressLeavePrompt?: boolean;
+  /**
+   * view 模式下是否保留缩放/翻页（不盖 toolbar-mask）。
+   * 不给＝保留。对 Word / Excel / PPT / PDF 一律生效。
+   */
+  keepViewControls?: boolean;
   /**
    * 文档解压之后的内容超过这么多字节就不转换了。不给＝不设这道闸。
    *

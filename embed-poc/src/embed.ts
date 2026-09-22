@@ -186,9 +186,14 @@ async function 打开(cmd: OpenCommand) {
         fileType: cmd.fileType,
         defaultFileName: cmd.fileName,
         lang: (cmd.lang as "zh") || "zh",
+        mode: cmd.mode,
         readOnly: cmd.readOnly,
         // 【2026-09-17 新增】不给就是允许，见 protocol.ts。
         allowDownload: cmd.allowDownload,
+        zoom: cmd.zoom,
+        migrateFitPageZoom: cmd.migrateFitPageZoom,
+        suppressLeavePrompt: cmd.suppressLeavePrompt,
+        keepViewControls: cmd.keepViewControls,
         loadSession,
         // 原样递过去，一个字段都不看——见 protocol.ts 里那段说明。
         plugins: cmd.plugins as never,

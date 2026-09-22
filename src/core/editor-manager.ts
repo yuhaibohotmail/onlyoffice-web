@@ -72,6 +72,26 @@ import {
   showOfficeXmlSizeLimitOverlay,
 } from "../internal/ui/office-xml-size-limit-overlay";
 
+/** 文档交互模式：view=只读预览，edit=可编辑。 */
+export type OnlyOfficeDocumentMode = "view" | "edit";
+
+/**
+ * 从 mode / readOnly 解析是否为只读预览。
+ * 同时出现时以 mode 为准；都不传则视为可编辑。
+ */
+export function resolveIsViewMode(options: {
+  mode?: OnlyOfficeDocumentMode;
+  readOnly?: boolean;
+}): boolean {
+  if (options.mode === "view") {
+    return true;
+  }
+  if (options.mode === "edit") {
+    return false;
+  }
+  return !!options.readOnly;
+}
+
 export type CreateEditorViewOptions = {
   isNew: boolean;
   fileName: string;
@@ -79,6 +99,12 @@ export type CreateEditorViewOptions = {
   url?: string;
   loader?: (url: string) => Promise<ArrayBuffer>;
   fileType?: string;
+  /**
+   * 首选开关：view=只读预览，edit=可编辑。
+   * 与 readOnly 同时出现时以本字段为准。
+   */
+  mode?: OnlyOfficeDocumentMode;
+  /** 兼容旧字段；等价于 mode:"view"。与 mode 同时出现时以 mode 为准。 */
   readOnly?: boolean;
   user?: User;
   lang?: string;
@@ -97,6 +123,26 @@ export type CreateEditorViewOptions = {
   variant?: OnlyOfficeEditorVariant;
   /** 【本项目新增 2026-09-17】界面上给不给下载 / 另存，默认给。见 grantDownloadForExport */
   allowDownload?: boolean;
+  /**
+   * OnlyOffice customization.zoom。
+   * -2=适应宽度，-1=适合页面，或 50–500 百分比。默认 -2。
+   */
+  zoom?: number;
+  /**
+   * localStorage 里若是「适合页面」(-1)，是否迁成当前 zoom。
+   * 仅当 zoom===-2 时默认 true；其它 zoom 默认 false。
+   */
+  migrateFitPageZoom?: boolean;
+  /**
+   * view 模式下是否抑制 iframe「离开此网站？」提示。默认 true。
+   */
+  suppressLeavePrompt?: boolean;
+  /**
+   * view 模式下是否保留缩放/翻页等视图控件（不盖 toolbar-mask）。
+   * 默认 true，对 Word / Excel / PPT / PDF 一律生效。
+   * 编辑拦截仍靠 asc_setRestriction(VIEW)。
+   */
+  keepViewControls?: boolean;
 };
 
 /**
@@ -219,6 +265,14 @@ type OnlyOfficeWindow = OnlyOfficeIframeWindow & {
 
 type ShellMainController = {
   mode?: { isEdit?: boolean; canEdit?: boolean };
+  appOptions?: { isEdit?: boolean; canEdit?: boolean };
+  permissions?: { edit?: boolean };
+  editorConfig?: { mode?: string };
+  api?: {
+    asc_setViewMode?: (view: boolean) => void;
+    asc_enableKeyEvents?: (enabled: boolean) => void;
+  };
+  disableEditing?: (disable: boolean) => void;
 };
 
 type WordHeaderView = {
@@ -245,6 +299,11 @@ export class EditorManager {
   private variant: OnlyOfficeEditorVariant = "editor";
   /** 【本项目新增 2026-09-17】见 grantDownloadForExport */
   private allowDownload = true;
+  /** customization.zoom；默认适应宽度 */
+  private zoom = -2;
+  private migrateFitPageZoom = true;
+  private suppressLeavePrompt = true;
+  private keepViewControls = true;
   /** 与容器一一对应，供事件与 Connector 使用同一稳定路由键。 */
   private instanceId: string;
   private containerId: string;
@@ -579,11 +638,46 @@ export class EditorManager {
     };
   }
 
+  /**
+   * 预览默认「适应宽度」。OnlyOffice 会把用户选过的缩放写进 localStorage，
+   * 并覆盖 customization.zoom；若以前卡在「适合页面」(-1)，百分比下拉几乎用不了。
+   * 开启 migrateFitPageZoom 时，把 -1 迁成当前 zoom（通常 -2）。
+   * 编辑器在 iframe 内读自己的 localStorage，父页与 iframe 都迁一次。
+   */
+  private preferFitWidthZoomPreference(storage?: Storage | null) {
+    if (!this.migrateFitPageZoom) {
+      return;
+    }
+    const target = String(this.zoom);
+    const keys = [
+      "de-settings-zoom",
+      "pdfe-settings-zoom",
+      "pe-settings-zoom",
+      "sse-settings-zoom",
+    ];
+    const targets = [storage, window.localStorage].filter(
+      (item): item is Storage => !!item,
+    );
+    for (const store of targets) {
+      try {
+        for (const key of keys) {
+          if (store.getItem(key) === "-1") {
+            store.setItem(key, target);
+          }
+        }
+      } catch {
+        // ignore quota / private mode
+      }
+    }
+  }
+
   /** 关闭 autosave 与保存按钮；保存快捷键由 installSaveShortcutBlocker 拦截。 */
   private buildEditorCustomization() {
     return {
       uiTheme: this.uiTheme,
       autosave: false,
+      // -2 = 适应宽度；-1 = 适合页面（预览框偏矮时会被缩得很小，缩放下拉也不好用）
+      zoom: this.zoom,
       layout: {
         header: {
           save: false,
@@ -1102,6 +1196,7 @@ export class EditorManager {
 
   private getShellMainController() {
     const win = this.getEditorFrameWindow() as OnlyOfficeIframeWindow & {
+      SSE?: { getController?: (name: string) => ShellMainController };
       PE?: { getController?: (name: string) => ShellMainController };
       DE?: { getController?: (name: string) => ShellMainController };
       getApplication?: () => {
@@ -1110,6 +1205,7 @@ export class EditorManager {
     };
 
     return (
+      win?.SSE?.getController?.("Main") ??
       win?.PE?.getController?.("Main") ??
       win?.getApplication?.()?.getController?.("Main") ??
       win?.DE?.getController?.("Main")
@@ -1163,12 +1259,17 @@ export class EditorManager {
       return;
     }
 
+    // DisableToolbar(true) 会盖 .toolbar-mask，缩放/翻页一起置灰。
+    // keepViewControls 时不盖 mask，编辑拦截靠 asc_setRestriction(VIEW)。
+    const maskToolbar = disabled ? !this.keepViewControls : true;
+    const disableStatusBar = disabled && this.keepViewControls ? false : true;
+
     if (documentType === DocumentType.Slide) {
       nc.trigger("editing:disable", disabled, {
         viewMode: disabled,
         allowSignature: !disabled,
         rightMenu: { clear: false, disable: true },
-        statusBar: true,
+        statusBar: disableStatusBar,
         leftMenu: { disable: disabled, previewMode: disabled },
         fileMenu: false,
         comments: { disable: false, previewMode: disabled },
@@ -1176,7 +1277,7 @@ export class EditorManager {
         review: true,
         viewport: disabled,
         documentHolder: { clear: disabled, disable: true },
-        toolbar: true,
+        toolbar: maskToolbar,
         header: { search: false },
         shortcuts: disabled ? false : undefined,
       });
@@ -1194,16 +1295,19 @@ export class EditorManager {
           allowSignature: false,
           allowProtect: false,
           rightMenu: { clear: true, disable: true },
-          statusBar: true,
+          statusBar: disableStatusBar,
           leftMenu: { disable: true, previewMode: true },
           fileMenu: { protect: true, history: false },
-          navigation: { disable: false, previewMode: true },
+          navigation: {
+            disable: false,
+            previewMode: !this.keepViewControls,
+          },
           comments: { disable: false, previewMode: true },
           chat: false,
           review: true,
           viewport: true,
           documentHolder: { clear: true, disable: true },
-          toolbar: true,
+          toolbar: maskToolbar,
           protect: true,
           header: { search: false, startfill: false },
           shortcuts: false,
@@ -1236,6 +1340,7 @@ export class EditorManager {
       return;
     }
 
+    // PDF / Excel 等：只读且 keepViewControls 时不盖 mask、不锁状态栏缩放。
     nc.trigger("editing:disable", disabled, {
       viewMode: disabled,
       reviewMode: false,
@@ -1245,17 +1350,57 @@ export class EditorManager {
       allowSignature: false,
       allowProtect: false,
       rightMenu: { clear: false, disable: true },
-      statusBar: true,
+      statusBar: disableStatusBar,
       leftMenu: { disable: false, previewMode: disabled },
       fileMenu: false,
-      navigation: { disable: false, previewMode: disabled },
+      navigation: {
+        disable: false,
+        previewMode: disabled && !this.keepViewControls,
+      },
       comments: { disable: false, previewMode: disabled },
       chat: false,
       review: true,
       viewport: false,
       documentHolder: { clear: false, disable: true },
-      toolbar: true,
+      toolbar: maskToolbar,
     });
+  }
+
+  /**
+   * 预览只读时去掉 iframe 的「离开此网站？」提示。
+   * PDF 以 edit 权限挂载后再锁 VIEW 时，web-apps 仍挂 onBeforeUnload，
+   * 缩放/限制会把文档标成已修改，切资源就会弹对话框。
+   */
+  private suppressLeavePromptForPreview() {
+    if (!this.readOnly || !this.suppressLeavePrompt) {
+      return;
+    }
+
+    const win = this.getEditorFrameWindow() as
+      | (OnlyOfficeIframeWindow & {
+          Common?: { localStorage?: { save?: () => void } };
+        })
+      | undefined;
+    if (!win) {
+      return;
+    }
+
+    win.onbeforeunload = () => {
+      try {
+        win.Common?.localStorage?.save?.();
+      } catch {
+        // ignore
+      }
+    };
+
+    try {
+      const api = this.getSdkApi() as
+        | { SetDocumentModified?: (v: boolean) => void }
+        | undefined;
+      api?.SetDocumentModified?.(false);
+    } catch {
+      // ignore
+    }
   }
 
   /** PPT 在通用只读逻辑之上追加：锁定 Main 控制器 + 禁用幻灯片侧栏。 */
@@ -1276,6 +1421,62 @@ export class EditorManager {
     if (main?.mode) {
       main.mode.isEdit = true;
       main.mode.canEdit = true;
+    }
+    if (main?.appOptions) {
+      main.appOptions.isEdit = true;
+      main.appOptions.canEdit = true;
+    }
+    if (main?.permissions) {
+      main.permissions.edit = true;
+    }
+    if (main?.editorConfig) {
+      main.editorConfig.mode = "edit";
+    }
+    try {
+      main?.disableEditing?.(false);
+    } catch {
+      // 解锁失败时仍继续清工具栏/单元格锁
+    }
+    main?.api?.asc_setViewMode?.(false);
+    main?.api?.asc_enableKeyEvents?.(true);
+
+    const win = this.getEditorFrameWindow() as OnlyOfficeIframeWindow & {
+      SSE?: { getController?: (name: string) => {
+        setMode?: (mode: unknown) => void;
+        setPreviewMode?: (mode: boolean) => void;
+        SetDisabled?: (disabled: boolean) => void;
+        DisableToolbar?: (disable: boolean, viewMode: boolean) => void;
+      } };
+      DE?: { getController?: (name: string) => {
+        setMode?: (mode: unknown) => void;
+        setPreviewMode?: (mode: boolean) => void;
+        SetDisabled?: (disabled: boolean) => void;
+        DisableToolbar?: (disable: boolean, viewMode: boolean) => void;
+      } };
+      PE?: { getController?: (name: string) => {
+        setMode?: (mode: unknown) => void;
+        setPreviewMode?: (mode: boolean) => void;
+        SetDisabled?: (disabled: boolean) => void;
+        DisableToolbar?: (disable: boolean, viewMode: boolean) => void;
+      } };
+    };
+    const app = win?.SSE ?? win?.DE ?? win?.PE;
+    try {
+      const cellEditor = app?.getController?.("CellEditor");
+      cellEditor?.setMode?.(main?.appOptions);
+      cellEditor?.setPreviewMode?.(false);
+    } catch {
+      // ignore
+    }
+    try {
+      app?.getController?.("DocumentHolder")?.SetDisabled?.(false);
+    } catch {
+      // ignore
+    }
+    try {
+      app?.getController?.("Toolbar")?.DisableToolbar?.(false, false);
+    } catch {
+      // ignore
     }
 
     this.getRestrictionSdkApi()?.asc_setCanSendChanges?.(true);
@@ -1540,18 +1741,26 @@ export class EditorManager {
 
     this.installSlideStructureEditBlocker();
     this.syncEditingRights(false);
+    this.suppressLeavePromptForPreview();
 
     if (documentType === DocumentType.Slide) {
       // 工具栏 delayed render 后再锁一次，确保「新增幻灯片」按钮被 DisableToolbar 处理。
       window.setTimeout(() => {
         if (this.readOnly) {
           this.syncShellEditingDisable(true, documentType);
+          this.suppressLeavePromptForPreview();
         }
       }, 0);
     }
 
     if (documentType === DocumentType.Cell) {
       this.getSdkApi()?.asc_Recalculate?.();
+    }
+
+    // 工具栏延迟渲染后可能再次挂上 beforeunload；再清一次。
+    if (this.suppressLeavePrompt) {
+      window.setTimeout(() => this.suppressLeavePromptForPreview(), 0);
+      window.setTimeout(() => this.suppressLeavePromptForPreview(), 500);
     }
   }
 
@@ -1605,6 +1814,8 @@ export class EditorManager {
       buildVersion: window.DocsAPI!.DocEditor.version(),
     });
 
+    this.preferFitWidthZoomPreference();
+
     this.editor = new window.DocsAPI!.DocEditor(this.containerId, {
       document: {
         fileType: doc.fileType,
@@ -1618,6 +1829,11 @@ export class EditorManager {
       documentType,
       editorConfig: {
         lang: this.editorLang,
+        // PDF 预览直接用 view：不挂「文档已修改」离开提示，也不进批注可编辑态。
+        // Word/表格仍保持 edit 挂载后再锁，避免打开时样式异常。
+        ...(this.readOnly && documentType === DocumentType.Pdf
+          ? { mode: "view" as const }
+          : {}),
         coEditing: {
           mode: "fast",
           change: false,
@@ -1633,6 +1849,9 @@ export class EditorManager {
         onAppReady: () => {
           // 尽早安装代理，供 WebSocket auth 与后续 downloadAs 使用。
           this.installIframeProxies();
+          this.preferFitWidthZoomPreference(
+            this.getEditorFrameWindow()?.localStorage,
+          );
         },
         onDocumentReady: () => {
           this.installSaveShortcutBlocker();
@@ -1648,8 +1867,12 @@ export class EditorManager {
 
           if (this.readOnly) {
             this.applyInitialReadOnlyState(documentType);
-          } else if (documentType === DocumentType.Word) {
-            this.scheduleWordDocModeHide();
+          } else {
+            this.restoreShellEditMode();
+            this.syncShellEditingDisable(false, documentType);
+            if (documentType === DocumentType.Word) {
+              this.scheduleWordDocModeHide();
+            }
           }
         },
         onDocumentStateChange: (event: { data: boolean }) => {
@@ -1821,7 +2044,7 @@ export class EditorManager {
     }
 
     this.destroy();
-    this.readOnly = !!options.readOnly;
+    this.readOnly = resolveIsViewMode(options);
     this.revisionReviewMode = !!options.revisionReview;
     this.server.setOfficeXmlEventConfig(options.officeXmlEvent);
     if (options.user) {
@@ -1876,6 +2099,11 @@ export class EditorManager {
     this.pluginsConfig = options.plugins;   // 【本 PoC 新增】
     this.variant = options.variant ?? "editor";   // 【本项目新增 2026-08-30】
     this.allowDownload = options.allowDownload ?? true;   // 【本项目新增 2026-09-17】
+    this.zoom = typeof options.zoom === "number" ? options.zoom : -2;
+    this.migrateFitPageZoom =
+      options.migrateFitPageZoom ?? this.zoom === -2;
+    this.suppressLeavePrompt = options.suppressLeavePrompt ?? true;
+    this.keepViewControls = options.keepViewControls ?? true;
 
     this.syncEditorBridge();
     this.mountDocEditor();
@@ -1915,6 +2143,12 @@ export class EditorManager {
 
   /** 就地切换只读；切到只读前先 downloadAs 落盘，避免后续导出仍是打开时的 Editor.bin。 */
   async setReadOnly(readOnly: boolean) {
+    return this.setMode(readOnly ? "view" : "edit");
+  }
+
+  /** 简单切换：view=只读预览，edit=可编辑。 */
+  async setMode(mode: OnlyOfficeDocumentMode) {
+    const readOnly = mode === "view";
     if (this.readOnly === readOnly) {
       return;
     }
@@ -1937,11 +2171,18 @@ export class EditorManager {
 
       this.installSlideStructureEditBlocker();
       this.syncEditingRights(!readOnly);
+      if (readOnly) {
+        this.suppressLeavePromptForPreview();
+      }
     } finally {
       onlyofficeEventbus.emit(ONLYOFFICE_EVENT_KEYS.LOADING_CHANGE, {
         loading: false,
       });
     }
+  }
+
+  getMode(): OnlyOfficeDocumentMode {
+    return this.readOnly ? "view" : "edit";
   }
 
   getReadOnly() {
