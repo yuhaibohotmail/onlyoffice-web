@@ -326,6 +326,9 @@ export class EditorManager {
   private migrateFitPageZoom = true;
   private suppressLeavePrompt = true;
   private keepViewControls = true;
+  private viewControlsObserver: MutationObserver | null = null;
+  private viewControlsTimer: number | null = null;
+  private viewControlsWatchdogStopTimer: number | null = null;
   /** 与容器一一对应，供事件与 Connector 使用同一稳定路由键。 */
   private instanceId: string;
   private containerId: string;
@@ -1398,6 +1401,61 @@ export class EditorManager {
     }
   }
 
+  private stopViewControlsWatchdog() {
+    if (this.viewControlsTimer !== null) {
+      window.clearInterval(this.viewControlsTimer);
+      this.viewControlsTimer = null;
+    }
+    if (this.viewControlsWatchdogStopTimer !== null) {
+      window.clearTimeout(this.viewControlsWatchdogStopTimer);
+      this.viewControlsWatchdogStopTimer = null;
+    }
+    if (this.viewControlsObserver) {
+      this.viewControlsObserver.disconnect();
+      this.viewControlsObserver = null;
+    }
+  }
+
+  /**
+   * OnlyOffice 会在 restriction / 工具栏延迟渲染后再次给缩放钮加 disabled。
+   * 短时轮询 + MutationObserver，把按钮保持可点。
+   */
+  private startViewControlsWatchdog() {
+    this.stopViewControlsWatchdog();
+    if (!this.keepViewControls || !this.readOnly) {
+      return;
+    }
+
+    const tick = () => {
+      if (!this.readOnly || !this.keepViewControls) {
+        this.stopViewControlsWatchdog();
+        return;
+      }
+      this.ensureViewControlsUsable();
+    };
+
+    tick();
+    this.viewControlsTimer = window.setInterval(tick, 400);
+    this.viewControlsWatchdogStopTimer = window.setTimeout(() => {
+      this.stopViewControlsWatchdog();
+    }, 12000);
+
+    try {
+      const win = this.getEditorFrameWindow();
+      const toolbar = win?.document?.querySelector(".toolbar");
+      if (toolbar && typeof MutationObserver !== "undefined") {
+        this.viewControlsObserver = new MutationObserver(() => tick());
+        this.viewControlsObserver.observe(toolbar, {
+          attributes: true,
+          subtree: true,
+          attributeFilter: ["class", "disabled", "aria-disabled"],
+        });
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   /**
    * 去掉 toolbar-mask，并强制启用 View 页缩放控件。
    * injectButtons 初始 disabled:true，且 keepState 可能仍含 lostConnect 等锁；
@@ -1502,6 +1560,27 @@ export class EditorManager {
       if (!root) {
         return;
       }
+      if (!root.getElementById("oow-keep-view-controls-css")) {
+        const style = root.createElement("style");
+        style.id = "oow-keep-view-controls-css";
+        style.textContent = `
+.slot-btn-ftp .btn, .slot-btn-ftw .btn, #slot-btn-zoom-100 .btn, #slot-btn-multiple-pages .btn,
+[id*="tlbtn-btn-ftp"], [id*="tlbtn-btn-ftw"],
+.slot-btn-ftp .btn.disabled, .slot-btn-ftw .btn.disabled, #slot-btn-zoom-100 .btn.disabled,
+#slot-btn-multiple-pages .btn.disabled {
+  opacity: 1 !important;
+  filter: none !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+.slot-btn-ftp .btn[disabled], .slot-btn-ftw .btn[disabled], #slot-btn-zoom-100 .btn[disabled],
+#slot-btn-multiple-pages .btn[disabled],
+[id*="tlbtn-btn-ftp"][disabled], [id*="tlbtn-btn-ftw"][disabled] {
+  pointer-events: auto !important;
+}
+`;
+        root.head?.appendChild(style);
+      }
       const slots = root.querySelectorAll(
         ".slot-btn-ftp button, .slot-btn-ftw button, #slot-btn-zoom-100 button, #slot-btn-multiple-pages button, [id*='tlbtn-btn-ftp'] button, [id*='tlbtn-btn-ftw'] button, [id*='tlbtn-btn-ftp'], [id*='tlbtn-btn-ftw'], #slot-btn-zoom-100 .btn, #slot-btn-multiple-pages .btn",
       );
@@ -1509,8 +1588,8 @@ export class EditorManager {
         el.classList.remove("disabled");
         el.removeAttribute("disabled");
         if (el instanceof HTMLElement) {
-          el.style.pointerEvents = "";
-          el.style.opacity = "";
+          el.style.pointerEvents = "auto";
+          el.style.opacity = "1";
         }
       });
     } catch {
@@ -1834,6 +1913,7 @@ export class EditorManager {
   }
 
   private destroyDocEditorInstance() {
+    this.stopViewControlsWatchdog();
     this.disconnectConnector();
     this.editor?.destroyEditor?.();
     this.editor = null;
@@ -2140,16 +2220,34 @@ export class EditorManager {
         sdk.asc_removeRestriction?.(ASC_RESTRICTION_VIEW);
         sdk.asc_setRestriction(ASC_RESTRICTION_NONE);
         this.restoreShellEditMode();
+        this.stopViewControlsWatchdog();
+        this.syncShellEditingDisable(false, documentType);
       } else {
         sdk.asc_setRestriction(ASC_RESTRICTION_VIEW);
         this.syncSlideReadOnlyExtras(true);
+        // keepViewControls：不要走 editing:disable。
+        // 即便 toolbar:false，viewMode/leftMenu 等仍会让 View 缩放钮反复变灰。
+        // 编辑拦截只靠 VIEW restriction；PPT 另有结构拦截。
+        if (this.keepViewControls && documentType !== DocumentType.Slide) {
+          if (documentType === DocumentType.Word) {
+            this.scheduleWordDocModeHide();
+          }
+          this.ensureViewControlsUsable();
+          this.startViewControlsWatchdog();
+        } else {
+          this.syncShellEditingDisable(true, documentType);
+          if (this.keepViewControls) {
+            this.ensureViewControlsUsable();
+            this.startViewControlsWatchdog();
+          }
+        }
       }
-      this.syncShellEditingDisable(!editing, documentType);
       return;
     }
 
     if (editing) {
       this.restoreShellEditMode();
+      this.stopViewControlsWatchdog();
       this.syncShellEditingDisable(false, documentType);
       this.editor.refreshFile?.(this.buildRefreshFileConfig(true));
     } else {
@@ -2157,7 +2255,19 @@ export class EditorManager {
       if (documentType !== DocumentType.Slide) {
         this.editor.denyEditingRights?.("");
       }
-      this.syncShellEditingDisable(true, documentType);
+      if (this.keepViewControls && documentType !== DocumentType.Slide) {
+        if (documentType === DocumentType.Word) {
+          this.scheduleWordDocModeHide();
+        }
+        this.ensureViewControlsUsable();
+        this.startViewControlsWatchdog();
+      } else {
+        this.syncShellEditingDisable(true, documentType);
+        if (this.keepViewControls) {
+          this.ensureViewControlsUsable();
+          this.startViewControlsWatchdog();
+        }
+      }
     }
   }
 
@@ -3215,6 +3325,7 @@ export class EditorManager {
   }
 
   destroy() {
+    this.stopViewControlsWatchdog();
     this.rejectPendingRename(new Error("OnlyOffice editor was destroyed"));
     if (this.userSaveTimer !== null) {
       window.clearTimeout(this.userSaveTimer);
