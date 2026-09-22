@@ -42,6 +42,8 @@ import {
   EditorManager,
   editorManagerFactory,
   getFileType,
+  resolveIsViewMode,
+  type OnlyOfficeDocumentMode,
   type OnlyOfficeEditorVariant,
   type OnlyOfficePluginsConfig,
 } from "./editor-manager";
@@ -58,6 +60,12 @@ export type OnlyOfficeManagerOptions = {
   fileType: FileType;
   /** 首次 bootstrap 打开的默认文件名 */
   defaultFileName: string;
+  /**
+   * 首选开关：view=只读预览，edit=可编辑。
+   * 与 readOnly 同时出现时以本字段为准。
+   */
+  mode?: OnlyOfficeDocumentMode;
+  /** 兼容旧字段；等价于 mode:"view"。与 mode 同时出现时以 mode 为准。 */
   readOnly?: boolean;
   user?: User;
   lang?: OnlyOfficeLang;
@@ -72,7 +80,7 @@ export type OnlyOfficeManagerOptions = {
   /**
    * 【本项目新增 2026-08-30】用编辑器还是查看器打开。默认编辑器。
    *
-   * ⚠ **与 `readOnly` 正交，不是它的替代**：只读是编辑器关掉编辑（仍有工具栏与
+   * ⚠ **与 `readOnly` / `mode` 正交，不是它的替代**：只读是编辑器关掉编辑（仍有工具栏与
    * 插件面板），查看器是换成另一个应用（`embed`，没有工具栏也没有插件面板）。
    * 完整对照见 editor-manager.ts 里 OnlyOfficeEditorVariant 的说明。
    */
@@ -87,12 +95,21 @@ export type OnlyOfficeManagerOptions = {
    * 有心人从开发者工具里照样拿得到。
    */
   allowDownload?: boolean;
+  /** OnlyOffice customization.zoom：-2 适应宽度，-1 适合页面，或百分比。默认 -2 */
+  zoom?: number;
+  /** localStorage 为 -1 时是否迁到当前 zoom；zoom===-2 时默认 true */
+  migrateFitPageZoom?: boolean;
+  /** view 模式下抑制「离开此网站？」。默认 true */
+  suppressLeavePrompt?: boolean;
+  /** view 模式下保留缩放/翻页（不盖 toolbar-mask）。默认 true */
+  keepViewControls?: boolean;
 };
 
 export type OpenDocumentInput = {
   fileName: string;
   file?: File;
   isNew?: boolean;
+  mode?: OnlyOfficeDocumentMode;
   readOnly?: boolean;
   loadSession?: number;
   officeXmlEvent?: OfficeXmlEventConfig;
@@ -120,6 +137,10 @@ export class OnlyOfficeManager {
   private variant?: OnlyOfficeEditorVariant;
   /** 【本项目新增 2026-09-17】见 OnlyOfficeManagerOptions.allowDownload */
   private allowDownload?: boolean;
+  private zoom?: number;
+  private migrateFitPageZoom?: boolean;
+  private suppressLeavePrompt?: boolean;
+  private keepViewControls?: boolean;
   private ready = false;
 
   private constructor(
@@ -129,12 +150,16 @@ export class OnlyOfficeManager {
     this.containerId = options.containerId;
     this.fileType = options.fileType;
     this.editor = editor;
-    this.readOnly = options.readOnly ?? false;
+    this.readOnly = resolveIsViewMode(options);
     this.theme = options.theme ?? DEFAULT_OFFICE_THEME;
     this.officeXmlEvent = options.officeXmlEvent;
     this.plugins = options.plugins;   // 【本 PoC 新增】
     this.variant = options.variant;   // 【本项目新增 2026-08-30】
     this.allowDownload = options.allowDownload;   // 【本项目新增 2026-09-17】
+    this.zoom = options.zoom;
+    this.migrateFitPageZoom = options.migrateFitPageZoom;
+    this.suppressLeavePrompt = options.suppressLeavePrompt;
+    this.keepViewControls = options.keepViewControls;
     if (options.user) {
       editor.setUser(options.user);
     }
@@ -175,6 +200,7 @@ export class OnlyOfficeManager {
     await manager.openDocument({
       fileName: options.defaultFileName,
       isNew: true,
+      mode: options.mode,
       readOnly: options.readOnly,
       loadSession: options.loadSession,
       officeXmlEvent: options.officeXmlEvent,
@@ -197,6 +223,7 @@ export class OnlyOfficeManager {
     await manager.openDocument({
       fileName: file.name,
       file,
+      mode: options.mode,
       readOnly: options.readOnly,
       loadSession: options.loadSession,
       officeXmlEvent: options.officeXmlEvent,
@@ -207,7 +234,10 @@ export class OnlyOfficeManager {
 
   /** 打开/切换文档（上传、新建、重开） */
   async openDocument(input: OpenDocumentInput) {
-    const readOnly = input.readOnly ?? this.readOnly;
+    const readOnly = resolveIsViewMode({
+      mode: input.mode,
+      readOnly: input.readOnly ?? this.readOnly,
+    });
 
     setDocumentObj(
       {
@@ -224,6 +254,7 @@ export class OnlyOfficeManager {
       file,
       fileName,
       isNew: !file,
+      mode: readOnly ? "view" : "edit",
       readOnly,
       user: this.editor.getUser(),
       lang: getOnlyOfficeLang(),
@@ -235,6 +266,10 @@ export class OnlyOfficeManager {
       plugins: this.plugins,   // 【本 PoC 新增】
       variant: this.variant,   // 【本项目新增 2026-08-30】
       allowDownload: this.allowDownload,   // 【本项目新增 2026-09-17】
+      zoom: this.zoom,
+      migrateFitPageZoom: this.migrateFitPageZoom,
+      suppressLeavePrompt: this.suppressLeavePrompt,
+      keepViewControls: this.keepViewControls,
     });
 
     this.readOnly = readOnly;
@@ -257,6 +292,10 @@ export class OnlyOfficeManager {
     return this.readOnly;
   }
 
+  getMode(): OnlyOfficeDocumentMode {
+    return this.readOnly ? "view" : "edit";
+  }
+
   /** 【本项目新增 2026-08-30】现在这个实例是哪一档。默认 editor。 */
   getVariant(): OnlyOfficeEditorVariant {
     return this.variant ?? "editor";
@@ -271,8 +310,12 @@ export class OnlyOfficeManager {
   }
 
   async setReadOnly(readOnly: boolean) {
-    await this.editor.setReadOnly(readOnly);
-    this.readOnly = readOnly;
+    await this.setMode(readOnly ? "view" : "edit");
+  }
+
+  async setMode(mode: OnlyOfficeDocumentMode) {
+    await this.editor.setMode(mode);
+    this.readOnly = mode === "view";
   }
 
   async toggleReadOnly() {
@@ -436,6 +479,7 @@ export class OnlyOfficeManagerFactory {
 
     await manager.openDocument({
       ...document,
+      mode: document.mode ?? options.mode,
       readOnly: document.readOnly ?? options.readOnly,
     });
 
