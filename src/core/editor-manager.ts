@@ -280,6 +280,28 @@ type WordHeaderView = {
   btnPDFMode?: { setVisible?: (visible: boolean) => void };
 };
 
+type ZoomControlLike = {
+  setDisabled?: (disabled: boolean) => void;
+  isDisabled?: () => boolean;
+  keepState?: unknown[];
+  disabled?: boolean;
+};
+
+type ViewTabControllerLike = {
+  SetDisabled?: (state: boolean) => void;
+  getView?: () => ViewTabViewLike | undefined;
+  view?: ViewTabViewLike;
+};
+
+type ViewTabViewLike = {
+  lockedControls?: ZoomControlLike[];
+  btnsFitToPage?: ZoomControlLike[] | { setDisabled?: (v: boolean) => void };
+  btnsFitToWidth?: ZoomControlLike[] | { setDisabled?: (v: boolean) => void };
+  btnZoom100?: ZoomControlLike;
+  btnMultiplePages?: ZoomControlLike;
+  cmbsZoom?: ZoomControlLike[];
+};
+
 export class EditorManager {
   private editor: DocEditor | null = null;
   /**
@@ -1377,8 +1399,9 @@ export class EditorManager {
   }
 
   /**
-   * 去掉 toolbar-mask，并解锁 View 页缩放控件（disableOnStart / SetDisabled）。
-   * editing:disable 即使 toolbar:false，别处仍可能留下 mask 或把 ViewTab 锁死。
+   * 去掉 toolbar-mask，并强制启用 View 页缩放控件。
+   * injectButtons 初始 disabled:true，且 keepState 可能仍含 lostConnect 等锁；
+   * 只清 disableOnStart 不够，会再次被 lockControls 置灰。
    */
   private ensureViewControlsUsable() {
     if (!this.keepViewControls) {
@@ -1387,40 +1410,12 @@ export class EditorManager {
 
     const win = this.getEditorFrameWindow() as
       | (OnlyOfficeIframeWindow & {
-          $?: (sel: string) => {
-            remove?: () => void;
-            length?: number;
-          };
-          DE?: {
-            getController?: (name: string) => {
-              SetDisabled?: (state: boolean) => void;
-              view?: { lockedControls?: unknown[] };
-            };
-          };
-          PDFE?: {
-            getController?: (name: string) => {
-              SetDisabled?: (state: boolean) => void;
-            };
-          };
-          PE?: {
-            getController?: (name: string) => {
-              SetDisabled?: (state: boolean) => void;
-            };
-          };
-          SSE?: {
-            getController?: (name: string) => {
-              SetDisabled?: (state: boolean) => void;
-            };
-          };
-          Common?: {
-            Utils?: {
-              lockControls?: (
-                lock: unknown,
-                state: boolean,
-                opts: { array: unknown },
-              ) => void;
-            };
-            enumLock?: { disableOnStart?: unknown; lostConnect?: unknown };
+          DE?: { getController?: (name: string) => ViewTabControllerLike };
+          PDFE?: { getController?: (name: string) => ViewTabControllerLike };
+          PE?: { getController?: (name: string) => ViewTabControllerLike };
+          SSE?: { getController?: (name: string) => ViewTabControllerLike };
+          getApplication?: () => {
+            getController?: (name: string) => ViewTabControllerLike;
           };
         })
       | undefined;
@@ -1429,34 +1424,95 @@ export class EditorManager {
     }
 
     try {
-      win.$?.(".toolbar-mask")?.remove?.();
-      win.$?.(".toolbar-group-mask")?.remove?.();
-      win.$?.(".toolbar.masked")?.remove?.(); // no-op if wrong API
-      const toolbar = win.document?.querySelector(".toolbar.masked");
-      toolbar?.classList.remove("masked");
       win.document
         ?.querySelectorAll(".toolbar-mask, .toolbar-group-mask")
         .forEach((el) => el.remove());
+      win.document
+        ?.querySelectorAll(".toolbar.masked")
+        .forEach((el) => el.classList.remove("masked"));
     } catch {
       // ignore
     }
+
+    const enableBtn = (btn: ZoomControlLike | null | undefined) => {
+      if (!btn || typeof btn.setDisabled !== "function") {
+        return;
+      }
+      try {
+        if (Array.isArray(btn.keepState)) {
+          btn.keepState.length = 0;
+        }
+        // 绕过 setDisabled 内部 this.disabled != disabled 短路
+        if (btn.isDisabled?.()) {
+          btn.setDisabled(false);
+        } else {
+          (btn as { disabled?: boolean }).disabled = true;
+          btn.setDisabled(false);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    const enableMany = (items: unknown) => {
+      if (!items) {
+        return;
+      }
+      if (Array.isArray(items)) {
+        items.forEach((item) => enableBtn(item as ZoomControlLike));
+        return;
+      }
+      const set = items as {
+        setDisabled?: (v: boolean) => void;
+        each?: (fn: (b: ZoomControlLike) => void) => void;
+        forEach?: (fn: (b: ZoomControlLike) => void) => void;
+      };
+      if (typeof set.each === "function") {
+        set.each((b) => enableBtn(b));
+      } else if (typeof set.forEach === "function") {
+        set.forEach((b) => enableBtn(b));
+      } else if (typeof set.setDisabled === "function") {
+        enableBtn(set as ZoomControlLike);
+      }
+    };
 
     try {
       const viewTab =
         win.DE?.getController?.("ViewTab") ??
         win.PDFE?.getController?.("ViewTab") ??
         win.PE?.getController?.("ViewTab") ??
-        win.SSE?.getController?.("ViewTab");
+        win.SSE?.getController?.("ViewTab") ??
+        win.getApplication?.()?.getController?.("ViewTab");
+
       viewTab?.SetDisabled?.(false);
-      const locks = viewTab?.view?.lockedControls;
-      if (locks && win.Common?.Utils?.lockControls) {
-        const disableOnStart = win.Common.enumLock?.disableOnStart;
-        if (disableOnStart !== undefined) {
-          win.Common.Utils.lockControls(disableOnStart, false, {
-            array: locks,
-          });
-        }
+      const view = viewTab?.view ?? viewTab?.getView?.();
+      enableMany(view?.btnsFitToPage);
+      enableMany(view?.btnsFitToWidth);
+      enableBtn(view?.btnZoom100);
+      enableBtn(view?.btnMultiplePages);
+      enableMany(view?.cmbsZoom);
+      enableMany(view?.lockedControls);
+    } catch {
+      // ignore
+    }
+
+    // DOM 兜底：去掉 disabled 样式，避免 keepState 残留导致仍灰
+    try {
+      const root = win.document;
+      if (!root) {
+        return;
       }
+      const slots = root.querySelectorAll(
+        ".slot-btn-ftp button, .slot-btn-ftw button, #slot-btn-zoom-100 button, #slot-btn-multiple-pages button, [id*='tlbtn-btn-ftp'] button, [id*='tlbtn-btn-ftw'] button, [id*='tlbtn-btn-ftp'], [id*='tlbtn-btn-ftw'], #slot-btn-zoom-100 .btn, #slot-btn-multiple-pages .btn",
+      );
+      slots.forEach((el) => {
+        el.classList.remove("disabled");
+        el.removeAttribute("disabled");
+        if (el instanceof HTMLElement) {
+          el.style.pointerEvents = "";
+          el.style.opacity = "";
+        }
+      });
     } catch {
       // ignore
     }
