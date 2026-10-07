@@ -31,7 +31,8 @@
     "poc:plugins": "node embed-poc/server/pregenerate-plugins.mjs",
     "poc:static": "node embed-poc/server/static-server.mjs",
     "poc:mock": "node embed-poc/server/mock-host.mjs",
-    "poc:e2e": "node embed-poc/probe/run.mjs"
+    "poc:e2e": "node embed-poc/probe/run.mjs",
+    "check:release": "node --test \"scripts/test/*.test.mjs\""
   },
   "dependencies": {
     "exceljs": "^4.4.0",

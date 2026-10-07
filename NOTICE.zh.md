@@ -61,6 +61,7 @@ ONLYOFFICE 按 GNU Affero 通用公共许可证第 3 版发布，并附有 Ascen
 ⚠ 许可证第 13 条要的是「**本版本**的完整对应源码」——所以部署一个版本时，
 要让界面上那个「获取源代码」指到**与它对得上的那个标签**，而不是仓库的当前状态。
 指法见 `LegalNoticeOptions.sourceUrl`（纯静态部署）或环境变量 `OOW_SOURCE_URL`（带后端时）。
+发布包只从「干净、而且正好在那个标签上」的树打（`scripts/release-guard.mjs`）。
 
 其中**格式转换引擎**（浏览器里那个 WebAssembly 模块）来自
 CryptPad 的 `onlyoffice-x2t-wasm`（<https://github.com/cryptpad/onlyoffice-x2t-wasm>）——

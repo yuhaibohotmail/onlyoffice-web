@@ -86,6 +86,12 @@ npm run release    # 装配整套 → release/onlyoffice-web-<版本>/（含 ven
 npm run release -- --no-vendor    # 目标机上已经有 vendor 时
 ```
 
+⚠ **发布包只从「干净、而且正好在 `v<version>` 标签上」的树打**（0.2.0 起）。界面上「获取源代码」指的就是那个标签，从别的状态打出来的包跑的代码与链接指向的不是同一份，而链接照样打得开。`make-release` 不满足就在第一步停下。本仓库之外打包 `embed-poc/dist` 的脚本，应对它要打的那份检出跑同一道检查：`node scripts/release-guard.mjs --root <检出目录>`（退 0 可以打，退 1 拒绝）。所以顺序是：改 `package.json` 的 `version` → 提交 → 在那个提交上打 `v<version>` 标签并推上去 → 再打包。
+
+```sh
+npm run check:release     # 发布守卫自己的测试（node:test，零设施）
+```
+
 ⚠ **`dist/` 自己跑不起来**，它只是前端那一半。整套还差两样：**后端进程**，
 以及 **`vendor/`**（编辑器本体、转换引擎、字体，约 1.5 GB）。
 而 `vendor/` **不进 git**，取它的 `npm run assets` 要 ssh 到跑着社区版镜像的机器上

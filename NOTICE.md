@@ -61,6 +61,7 @@ together with all the scripts needed to rebuild it.
 ⚠ Section 13 of the license requires "the complete Corresponding Source of **this version**" — so when you deploy a version,
 the "Get source code" link in the interface must point to **the tag that matches that version**, not to the current state of the repository.
 For how to set it, see `LegalNoticeOptions.sourceUrl` (plain static deployment) or the environment variable `OOW_SOURCE_URL` (deployment with a backend).
+Release packages are only built from a clean tree sitting exactly on that tag (`scripts/release-guard.mjs`).
 
 Within it, the **format conversion engine** (the WebAssembly module in the browser) comes from
 CryptPad's `onlyoffice-x2t-wasm` (<https://github.com/cryptpad/onlyoffice-x2t-wasm>) —

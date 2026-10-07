@@ -33,6 +33,20 @@ import path from "node:path";
 
 import { PROJECT_ROOT, SDK_ROOT, SDK_VERSION, X2T_DIR, X2T_FONTS_DIR } from "../config.mjs";
 import { 归档里没有的 } from "../demo/server/source-archive.mjs";
+import { reportReleaseTree } from "./release-guard.mjs";
+
+/**
+ * 【2026-10-07 新增】**第一步：树干净、而且正好在 `v<version>` 标签上，否则不打。**
+ *
+ * 界面上「获取源代码」指向的是 `v<package.json 的 version>` 那个标签（AGPL 第 13 条要的是
+ * 「本版本」的对应源码）。从脏树、或者从标签之后又加了提交的树打出来的包，跑的代码与那条链接
+ * 指向的不是同一份，而那条链接照样打得开，没有任何东西会说不对。v0.1.0 那一版出去的包就是这样：
+ * 标签之后又加了几个提交才打的。所以这一道放在最前面，在任何检查与拷贝之前。
+ *
+ * `OOW_RELEASE_GUARD_ONLY=1` 只跑这一道就退出（给测试用，不会装配任何东西）。
+ */
+if (!reportReleaseTree(PROJECT_ROOT)) process.exit(1);
+if (process.env.OOW_RELEASE_GUARD_ONLY === "1") process.exit(0);
 
 const argOf = (name, dflt) => {
   const i = process.argv.indexOf(name);

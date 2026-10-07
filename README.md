@@ -91,6 +91,17 @@ npm run release    # assemble the full package → release/onlyoffice-web-<versi
 npm run release -- --no-vendor    # when the target machine already has vendor
 ```
 
+⚠ **A release is only built from a clean tree sitting exactly on the tag `v<version>`** (added in 0.2.0).
+The "Get source code" link in the UI points at that tag, so a package built from anything else runs code the link
+does not lead to — and the link still opens. `make-release` refuses otherwise, before doing anything. A packaging
+script outside this repository that bundles `embed-poc/dist` should run the same check against the
+checkout it packages: `node scripts/release-guard.mjs --root <checkout>` (exit 0 = may release, 1 = refused).
+The order is therefore: bump `version` in `package.json`, commit, tag that commit `v<version>`, push the tag, then build.
+
+```sh
+npm run check:release     # the release guard's own tests (node:test, no infrastructure)
+```
+
 ⚠ **`dist/` cannot run on its own**; it is only the front-end half. The full package also needs two things: **the back-end process**,
 and **`vendor/`** (the editors, the conversion engine and fonts, ~1.5 GB).
 `vendor/` is **not in git**, and `npm run assets`, which fetches it, needs ssh access to a host running the Community Edition image.
