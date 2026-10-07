@@ -77,11 +77,18 @@ npm run fixtures:formats
 
 ```sh
 npm run poc:build     # build its three pages
-npm run poc:e2e       # start the servers, run all seven passes, stop them (one pass is **expected to fail**)
+npm run poc:e2e       # start the servers, run all nine passes, stop them (one pass is **expected to fail**)
 ```
 
 It answers questions such as "does it still work behind a server that only serves files, like nginx" and
 "does the rule of requesting fresh credentials every time hold". Results are in [embed-poc/README.md](embed-poc/README.md).
+
+**Embed protocol version 2** (added in 0.2.0) lets the embed page be driven by a host that speaks a subset of
+the ONLYOFFICE Docs integration protocol: the host signs an editor configuration (a config token), and a small
+**integration backend** fetches `document.url` with a request signature and sends saves back to `callbackUrl` as a
+signed callback. **That backend is not part of this repository**: whoever embeds the page implements it, against
+the HTTP contract in [INTEGRATION.md](INTEGRATION.md). It does no conversion and no collaboration. Version 1 needs
+no backend at all and keeps working; the page speaks both.
 
 ## Build and release
 
@@ -182,7 +189,8 @@ never at what the UI says.
 | `demo/server/` | Back end: routing + ticket signing and verification + storage and versioning |
 | `demo/plugin/` | Our own ONLYOFFICE plugin |
 | `demo/e2e/run.mjs` | Automated tests |
-| `embed-poc/` | **An example of embedding this component in someone else's page**: the host page holds the editor in an iframe, and the two sides talk only through `postMessage`. It is self-contained: it depends on no other code in this repository and ships its own servers. It is also a test suite (`npm run poc:e2e`, seven passes, one of them **expected to fail**). Results and pitfalls are in [embed-poc/README.md](embed-poc/README.md) |
+| `embed-poc/` | **An example of embedding this component in someone else's page**: the host page holds the editor in an iframe, and the two sides talk only through `postMessage`. It is self-contained: it depends on no other code in this repository and ships its own servers. It is also a test suite (`npm run poc:e2e`, nine passes, one of them **expected to fail**). Results and pitfalls are in [embed-poc/README.md](embed-poc/README.md) |
+| `INTEGRATION.md` | **The contract of embed protocol version 2**: the `postMessage` messages, and the HTTP endpoints an integration backend must provide (that backend is implemented outside this repository) |
 | `NOTICE.md` | Modification notice (required by the license) |
 | `LICENSE` | Full AGPL-3.0 text + Ascensio's five additional terms |
 | `poc/backend-x2t/` | ⚠ **Abandoned, left in place for now.** An experiment with a middle path, running a wasm conversion engine on the back end as well; we decided against it (reasons in `BACKEND.md`). ⚠ The lines in its scripts that read `fixtures/lesson-plan-zh.docx` **no longer point to anything**: the fixtures moved into `demo/` on 2026-08-30 and the abandoned code was not updated. The code itself is fine; only the path is out of date |
@@ -344,5 +352,6 @@ so running into one again costs far more time than reading this list once.
 
 - **No collaboration, and overwrites happen without an error.** The mock server lives in a single tab, and there is no way in for a second person.
   If two people open the same document and each saves, the later save completely overwrites the earlier one, and both see success.
+  (Through the embed page, a host can prevent this with `baseVersion`: it refuses the later save, and the person keeps a local copy.)
 - **No autosave.** Saving is triggered by clicking a button. If the browser crashes or the tab is closed, all changes are lost.
 - **`Ctrl+S` is intercepted** (the component deliberately disables the editor's built-in save); pressing it does nothing and reports nothing.

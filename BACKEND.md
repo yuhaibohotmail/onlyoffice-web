@@ -300,6 +300,13 @@ Which cases count as "cannot tolerate" is worth pinning down; otherwise this pro
 is aimed at it, and its premise is "the host application cannot get DS". **That premise does not hold wherever DS is already available.**
 For an environment where DS is not yet deployed, installing one is a matter of deployment configuration, not a new engineering project.
 
+**Added 2026-10-07 — the integration backend of embed protocol version 2.** Version 2 of the embed protocol needs a
+small integration backend. It is not the middle path rejected above: it **does not convert** (conversion stays in the
+browser) and **does not collaborate**. It only lets a host that already speaks the ONLYOFFICE Docs integration protocol
+(config token, `document.url`, signed callback) drive the embed page the same way it drives a document server. It is
+**not part of this repository**: integrators implement it against [INTEGRATION.md](INTEGRATION.md). Without it the
+component still works from plain static hosting (embed protocol version 1), which is reason 2 above, unchanged.
+
 So before building that tier, answer one question first: **is saving that one session worth maintaining a second path for opening documents?**
 Answering "yes" is entirely defensible (the first three reasons are real), but write it down;
 otherwise, six months from now nobody will be able to say how this project relates to DS.

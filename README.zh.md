@@ -72,11 +72,13 @@ npm run fixtures:formats
 
 ```sh
 npm run poc:build     # 构建它那三个页面
-npm run poc:e2e       # 起服务器、跑完七趟、停掉（其中一趟**期望红**）
+npm run poc:e2e       # 起服务器、跑完九趟、停掉（其中一趟**期望红**）
 ```
 
 它答的是「换成 nginx 这种只发文件的服务器还正不正常」「凭据每次现要那条约定成不成立」
 这一类问题，读数在 [embed-poc/README.zh.md](embed-poc/README.zh.md)。
+
+**嵌入协议第二版**（0.2.0 新增）：让一个讲 ONLYOFFICE Docs 接入协议子集的宿主能驱动接入页——宿主签配置令牌，一个小的**接入后端**带签名去取 `document.url`、把存件经带签名的回调送回 `callbackUrl`。**这个接入后端不在本仓库里**，由使用方照 [INTEGRATION.zh.md](INTEGRATION.zh.md) 里的 HTTP 接口约定自己实现；它不转换、不协同。第一版不需要任何后端，照旧能用，接入页两版都认。
 
 ## 打包与发布
 
@@ -171,7 +173,8 @@ dev 与 `vite preview` 下这件事由 vite 代劳（`demo/vite.config.ts` 里�
 | `demo/server/` | 后端：路由 + 签票验票 + 落盘与版本 |
 | `demo/plugin/` | 我们自己写的那个 OnlyOffice 插件 |
 | `demo/e2e/run.mjs` | 自动实测 |
-| `embed-poc/` | **把这个组件嵌进别人页面里的示例**：宿主页用 iframe 装下编辑器，两边只经 `postMessage` 说话。它自足——不依赖本仓库其余任何代码，后台服务自带。同时是一套实测（`npm run poc:e2e`，七趟，其中一趟**期望红**）。读数与容易出错的地方见 [embed-poc/README.zh.md](embed-poc/README.zh.md) |
+| `embed-poc/` | **把这个组件嵌进别人页面里的示例**：宿主页用 iframe 装下编辑器，两边只经 `postMessage` 说话。它自足——不依赖本仓库其余任何代码，后台服务自带。同时是一套实测（`npm run poc:e2e`，九趟，其中一趟**期望红**）。读数与容易出错的地方见 [embed-poc/README.zh.md](embed-poc/README.zh.md) |
+| `INTEGRATION.zh.md` | **嵌入协议第二版的约定**：`postMessage` 消息，以及接入后端要提供的 HTTP 接口（接入后端在本仓库之外实现） |
 | `NOTICE.md` | 修改说明（许可要求的） |
 | `LICENSE` | AGPL-3.0 全文 + Ascensio 的五条附加条款 |
 | `poc/backend-x2t/` | ⚠ **作废，暂时原地留着。** 试过「后端也跑一份 wasm 转换引擎」那条中间路，裁定不做（理由见 [BACKEND.zh.md](BACKEND.zh.md)）。⚠ 它几个脚本里读 `fixtures/lesson-plan-zh.docx` 的那几行**已经指不到东西了**——夹具 2026-08-30 搬进了 `demo/`，作废的东西没跟着改。那不是它坏了，是路径过期了 |
@@ -333,5 +336,6 @@ dev 与 `vite preview` 下这件事由 vite 代劳（`demo/vite.config.ts` 里�
 
 - **不支持协作，而且互相覆盖时不报错。** 模拟服务只活在一个标签页里，没有第二个人的入口。
   两个人打开同一份文档各自保存，后保存的把先保存的整个覆盖掉，两边都显示成功。
+  （经接入页时，宿主可以用 `baseVersion` 防住这件事：拒掉后存的那一份，那个人自己留一份到本地。）
 - **不做自动保存。** 保存由人点按钮触发。浏览器崩了或标签页被关，改动全丢。
 - **`Ctrl+S` 被拦掉了**（组件刻意关掉了编辑器自带的保存），按下去没反应也不报错。
