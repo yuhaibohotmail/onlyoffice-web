@@ -33,6 +33,22 @@
  * （**永远不要写 `"*"`**，那是把凭据广播给此刻恰好占着那个 frame 的任何文档）；
  * 接入页收的时候要校验 `event.origin`，否则任何一个开着它的页面都能伪造
  * 「已保存」或者塞一份自己的头进来。
+ *
+ * ── 【2026-10-07 新增】第二版协议，与第一版并存 ─────────────────────────
+ *
+ * 第二版（`onlyoffice-web-embed/2`）要一个**接入后端**：宿主不再递取件、存件地址与请求头，
+ * 只递一张**配置令牌**（宿主按 ONLYOFFICE Docs 的接入协议签的那份编辑器配置）和接入后端的地址。
+ * 取件、存件都由接入后端代办。**接入后端不在这个仓库里**，由使用方自己实现；它要提供哪几个
+ * HTTP 接口、各自怎么答，全写在仓库根的 `INTEGRATION.md`，那份是接入页与它之间唯一的约定。
+ * 于是**用户的令牌不再进这个 iframe**，「每次现要头」那一问一答在第二版里也就没有了。
+ *
+ * ⚠ **两版怎么并存**：接入页一加载就**用两个协议名各发一条 `ready`**。宿主比协议名是全等，
+ * 所以第一版的宿主只认得第一版那条，第二版的只认得第二版那条，各自只收到一条。
+ * 之后**第一条 `open` 用的是哪个协议名，这一页就按哪个走到底**，另一个名字的消息一律不理。
+ * 第一版那一套原样保留，到所有宿主都换成第二版之后再去掉。
+ *
+ * 第二版里**只认令牌里的值**：`open` 里就算带着 `fileName`、`downloadUrl`、`readOnly`、
+ * `allowDownload`、`plugins` 这些第一版的明文字段，也一个都不看。
  */
 
 /** 协议名带版本。两边对不上就当场拒绝，而不是按半懂的字段往下走。 */
@@ -180,12 +196,127 @@ export type EmbedMessage = ReadySignal | HeadersRequest | SavedSignal | FailedSi
 
 // ── 两边都用的小工具 ────────────────────────────────────────────────────
 
-/** 是不是这份协议的消息。**先过这一关再看 type**，别拿别人的消息往下解析。 */
-export function isProtocolMessage(data: unknown): data is { protocol: string; type: string } {
+/**
+ * 是不是这份协议的消息。**先过这一关再看 type**，别拿别人的消息往下解析。
+ *
+ * 不给第二个参数时只认第一版——第一版的宿主这么调，行为与加第二版之前逐字相同。
+ */
+export function isProtocolMessage(
+  data: unknown,
+  protocol: string = PROTOCOL,
+): data is { protocol: string; type: string } {
   return (
     typeof data === "object" &&
     data !== null &&
-    (data as { protocol?: unknown }).protocol === PROTOCOL &&
+    (data as { protocol?: unknown }).protocol === protocol &&
     typeof (data as { type?: unknown }).type === "string"
   );
 }
+
+// ══ 第二版（2026-10-07 新增）════════════════════════════════════════════
+
+export const PROTOCOL_V2 = "onlyoffice-web-embed/2" as const;
+
+/** 这个接入页认得的全部协议名。 */
+export const PROTOCOLS = [PROTOCOL, PROTOCOL_V2] as const;
+export type ProtocolName = (typeof PROTOCOLS)[number];
+
+/** 是两版里的哪一版（都不是就回 null）。 */
+export function protocolOf(data: unknown): ProtocolName | null {
+  for (const p of PROTOCOLS) if (isProtocolMessage(data, p)) return p;
+  return null;
+}
+
+// ── 宿主 → 接入页 ──
+
+/**
+ * 打开一份文档（第二版）。
+ *
+ * 文件名、类型、能不能编辑、能不能下载、插件、基准版**全在令牌里**，这里不再有明文。
+ */
+export type OpenCommandV2 = {
+  protocol: typeof PROTOCOL_V2;
+  type: "open";
+  /**
+   * 配置令牌：宿主按 ONLYOFFICE Docs 的接入协议签的那份编辑器配置（HS256 JWT，
+   * 载荷里有 `document.url`、`document.key`、`document.permissions`、
+   * `editorConfig.callbackUrl`、`editorConfig.mode`、`editorConfig.user` 等）。
+   * 接入页**不解析它**，原样交给接入后端，由那边验签。
+   */
+  token: string;
+  /**
+   * 接入后端在哪（它的 `/api/...` 前面那一截）。不给＝与接入页同源、同一挂载前缀，
+   * 也就是部署时的样子。给相对地址时按接入页自己的地址解析。
+   */
+  backendUrl?: string;
+  /** 与第一版同义。这是宿主对这一页的设置，不是文档的属性，所以不进令牌。 */
+  officeXmlLimitBytes?: number;
+  /** 界面语言偏好。**令牌里有 `editorConfig.lang` 时以令牌为准。** */
+  lang?: string;
+};
+
+/** 「存一下」（第二版）。 */
+export type SaveCommandV2 = {
+  protocol: typeof PROTOCOL_V2;
+  type: "save";
+};
+
+/**
+ * 「把上次没存上的那一份存到我本地」。
+ *
+ * 只在上一条 `failed` 带着 `unsavedKept: true` 之后才有意义：那一份字节还留在接入页内存里，
+ * 收到这条就在浏览器里把它存成一个本地文件。**不许下载的会话也照做**——那是用户自己刚改的内容，
+ * 不给就等于丢数（浏览器版的「不许下载」本来就只是藏按钮，见 `allowDownload`）。
+ */
+export type DownloadUnsavedCommand = {
+  protocol: typeof PROTOCOL_V2;
+  type: "download-unsaved";
+};
+
+export type HostMessageV2 = OpenCommandV2 | SaveCommandV2 | DownloadUnsavedCommand;
+
+// ── 接入页 → 宿主 ──
+
+/** 「我加载好了」（第二版）。顺带说明这一页认得哪几版。 */
+export type ReadySignalV2 = {
+  protocol: typeof PROTOCOL_V2;
+  type: "ready";
+  protocols: string[];
+};
+
+/** 文档打开了。三格都取自接入后端验过的令牌，宿主据此画按钮（比如不许下载就不画导出）。 */
+export type OpenedSignal = {
+  protocol: typeof PROTOCOL_V2;
+  type: "opened";
+  mode: "edit" | "view";
+  allowDownload: boolean;
+  baseVersion: number | null;
+};
+
+/** 存件成功（第二版）。基准版由接入页自己往前推，宿主不用再管。 */
+export type SavedSignalV2 = {
+  protocol: typeof PROTOCOL_V2;
+  type: "saved";
+  version: number | null;
+  size: number;
+};
+
+export type FailedSignalV2 = {
+  protocol: typeof PROTOCOL_V2;
+  type: "failed";
+  stage: "open" | "session" | "download" | "export" | "save" | "download-unsaved";
+  message: string;
+  /** 状态码。宿主拒绝时是**宿主自己回的那个**（接入后端原样转交），比如版本冲突的 409。 */
+  status?: number;
+  /** 报文原文（截到 800 字节），宿主要展示给人看。 */
+  body?: string;
+  /** 这个失败是宿主说的，还是接入后端自己说的（没有就是接入页自己）。 */
+  from?: "host" | "backend";
+  /**
+   * 这次没存上的那一份字节还留在接入页里。为 true 时宿主应当给人一个「存到本地」的按钮，
+   * 点了就发 `download-unsaved`。
+   */
+  unsavedKept: boolean;
+};
+
+export type EmbedMessageV2 = ReadySignalV2 | OpenedSignal | SavedSignalV2 | FailedSignalV2;

@@ -5,11 +5,11 @@
 A **self-contained** example: a host page holds this editor in an iframe, and the two sides talk only through `postMessage`.
 The document is fetched from an address the host provides and, after editing, saved back to an address the host provides.
 
-It is also six live tests, each answering a question you cannot answer without running it (readings are below under "What was measured").
+It is also eight live tests, each answering a question you cannot answer without running it (readings are below under "What was measured").
 
 ```sh
 npm run poc:build     # build the three pages → embed-poc/dist/
-npm run poc:e2e       # start the servers, run all seven passes, stop (one of the passes is **expected to fail**)
+npm run poc:e2e       # start the servers, run all nine passes, stop (one of the passes is **expected to fail**)
 ```
 
 Running the parts individually:
@@ -50,10 +50,12 @@ Write one vendor's backend endpoints or data shapes into it, and this component 
 | `index.html` + `src/host.ts` | Host page, standing in for a future business application. It has a switch that is **deliberately wrong**, see below |
 | `static-check.html` + `src/static-check.ts` | Opens only a blank document, **zero fixtures, zero mocks**; answers question 1 on its own |
 | `server/static-server.mjs` | **The dumb half**, stands in for nginx. It only serves files; **there is not a single line of code that rewrites content** |
-| `server/mock-host.mjs` | The mock half, stands in for the document backend. It also builds a minimal docx on the fly (with its own zip writer) |
+| `server/mock-host.mjs` | The mock half, stands in for the document backend. It also builds a minimal docx on the fly (with its own zip writer). For protocol version 2 it also plays a host that speaks the ONLYOFFICE Docs integration protocol (signs the config token, checks fetch signatures, answers callbacks) |
+| `server/fake-backend.mjs` | **Test fake** of the integration backend that protocol version 2 needs (the real one is not in this repository; see [INTEGRATION.md](../INTEGRATION.md)). In-memory, minimal, never to be deployed |
+| `server/hs256.mjs` | The HS256 JWT helper the two test servers above share |
 | `server/pregenerate-plugins.mjs` | **The step that belongs at deployment time**: replaces the relative addresses in the plugin registry with absolute paths |
 | `plugin/` | This PoC's own minimal plugin — **it only displays the `options` it receives**, which is the only channel for the host to pass credentials to a plugin. The icon is drawn on the fly by `make-icon.mjs`; no binary is committed |
-| `probe/*.mjs` | Six live tests + a `run.mjs` that chains them together |
+| `probe/*.mjs` | Eight live tests + a `run.mjs` that chains them together |
 
 **The two backends are two separate processes, not merged.** They stand in for two different things (nginx / document backend)
 and answer two different questions. Once merged, "the plugin panel appeared" can no longer tell you whether the static half was enough
@@ -207,6 +209,23 @@ Two other changes were made along the way, both found during this work:
   The type table in `demo/server/` was missing the same line, and it was added there too.
   ⚠ **After the fix, browsers that opened the page before will keep downloading**: that tree is served with a one-year immutable cache, so the wrong response, together with its type, is already stored in the browser cache,
   and the browser no longer asks the server (measured: after the fix, the same browser profile still downloaded, and the request never reached the server; a fresh profile did not download). Clear the cache once in that browser.
+
+### 9. Protocol version 2 (added 2026-10-07) — works next to version 1, and a refused save loses nothing
+
+Version 2 (`onlyoffice-web-embed/2`) replaces "the host hands over URLs and headers" with "the host hands over one
+config token": an editor configuration signed the ONLYOFFICE Docs way. Fetching and saving go through an
+**integration backend** that is not part of this repository; its contract is [INTEGRATION.md](../INTEGRATION.md).
+The page posts one `ready` per protocol name and follows whichever protocol the first `open` uses.
+
+Two passes cover it, run against `server/fake-backend.mjs` with the mock playing the host:
+
+| Pass | What it asserts | Reading |
+|---|---|---|
+| ⑦ `v2-flow.mjs` | Plain version 1 fields in `open` (read-only, a fake URL, base version 999) are ignored: the document opens editable, at base version 1, and the fake URL is never requested; every fetch signature matches the URL the host saw (`use: "fetch"`, `exp`); real typing reaches the stored bytes; the callback is status 6 / forcesavetype 1 with base version 1; a version 1 `save` sent afterwards does nothing; a second save in the same session succeeds | 15/15 |
+| ⑧ `v2-conflict.mjs` | Two sessions open version 1; the first save wins; the second is refused with the host's 409, `from: "host"`, `unsavedKept: true`; the stored file is not overwritten; the second user (a no-download session) clicks "save my copy locally" and the downloaded file contains their typing | 10/10 |
+
+Before the mock learned to play a version 2 host, ⑦ was red (3/15: nothing opened). Version 1's six passes stayed green
+throughout, at the root and under the `/oow` prefix.
 
 ---
 

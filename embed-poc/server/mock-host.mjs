@@ -26,6 +26,17 @@
  * 而那时用户的成果只在浏览器内存里。这里把「过期」换成「用过就作废」，
  * 时间从十几分钟压到一次请求，坏法一模一样，但一秒就看得见。
  *
+ * ── 【2026-10-07 新增】它也会当「讲 ONLYOFFICE Docs 接入协议的宿主」（第二版协议用）─────
+ *
+ * 第二版里宿主不递地址与头，只签一张**配置令牌**；取件与存件经接入后端（实测里是
+ * `fake-backend.mjs`），接入后端带着签名来取 `document.url`、存件时带签名回调 `callbackUrl`。
+ * 这一半就答这三件：`POST /oo/config` 签令牌、`GET /oo/file` 核取件签名再给字节、
+ * `POST /oo/callback` 核回调令牌、比 `baseVersion`、去取暂存的那份、存下。
+ * 这几条路径是这个 mock 自己起的名字，**不抄任何真实后端的**；签名与回调的形状照的是
+ * `INTEGRATION.md` 里写的那份公开约定。
+ *
+ * 第二版要的密钥从环境变量 `OOW_JWT_SECRET` 读（与接入后端共用）；没设时这三条回 500，第一版照常。
+ *
  * 跑法：node embed-poc/server/mock-host.mjs [端口]
  */
 
@@ -33,6 +44,8 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { sign, verify } from "./hs256.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(HERE, "..", "dist");
@@ -163,6 +176,17 @@ const 见过的凭据 = new Set();
 const 凭据流水 = [];
 const 事件 = [];
 
+// ── 第二版那一半的状态 ──
+const 密钥 = process.env.OOW_JWT_SECRET || "";
+/** 发出去的配置令牌里的 document.key。回调带来的 key 必须是其中之一。 */
+const 发过的key = new Set();
+/** 取件签名核过几次、几次对几次错。判据取这两个数。 */
+const 取件签名 = { 对: 0, 错: 0, 错因: [] };
+/** 收到的回调（解开之后的载荷），按顺序。 */
+const 回调 = [];
+/** 被要过、但这里没有的路径。判「明文里那个假地址从没被要过」用它。 */
+const 没有的路径 = [];
+
 function 记(名, 详) {
   事件.push({ 时刻: new Date().toISOString(), 名, ...详 });
   console.log("[mock] " + 名 + (详 ? " " + JSON.stringify(详) : ""));
@@ -275,6 +299,105 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { version: 文档.版本, size: 字节.length });
   }
 
+  // ── 第二版：签配置令牌 ──
+  // ⚠ 真实宿主里签令牌的是宿主自己的后端，前端只是转递；这里收下前端说的插件配置与
+  // 「许不许下载」再签，只是为了让实测能切换这两格。
+  if (p === "/oo/config" && req.method === "POST") {
+    if (!密钥) return json(res, 500, { error: "这个 mock 没配 OOW_JWT_SECRET，当不了第二版的宿主" });
+    const 块 = [];
+    for await (const c of req) 块.push(c);
+    let 要 = {};
+    try { 要 = JSON.parse(Buffer.concat(块).toString("utf8") || "{}"); } catch { /* 当空的 */ }
+    const 本源 = "http://" + req.headers.host;
+    const key = "poc-" + 文档.版本 + "-" + Math.random().toString(36).slice(2, 10);
+    发过的key.add(key);
+    const t = Math.floor(Date.now() / 1000);
+    const token = sign({
+      document: {
+        fileType: "docx",
+        key,
+        title: 文档.文件名,
+        url: 本源 + "/oo/file",
+        permissions: { edit: true, download: 要.download !== false },
+        baseVersion: 文档.版本,
+      },
+      documentType: "word",
+      editorConfig: {
+        callbackUrl: 本源 + "/oo/callback",
+        mode: "edit",
+        lang: "zh-CN",
+        user: { id: "poc-user", name: "实测" },
+        ...(要.plugins ? { plugins: 要.plugins } : {}),
+      },
+      iat: t,
+      exp: t + 1200,
+    }, 密钥);
+    记("签配置令牌", { key, 基准版: 文档.版本, 许下载: 要.download !== false });
+    return json(res, 200, { token });
+  }
+
+  // ── 第二版：取件，核签名头 ──
+  if (p === "/oo/file" && req.method === "GET") {
+    const h = req.headers.authorization || "";
+    const v = 密钥 ? verify(h.startsWith("Bearer ") ? h.slice(7) : "", 密钥) : { ok: false, why: "没配密钥" };
+    // 接入后端签进去的地址，必须逐字等于这边看到的这一个（协议 + Host 头 + 请求行原样）。
+    const 看到的 = "http://" + req.headers.host + req.url;
+    const 错因 = !v.ok ? v.why
+      : v.payload.payload?.url !== 看到的 ? "payload.url 是 " + v.payload.payload?.url + "，这边看到的是 " + 看到的
+      : v.payload.use !== "fetch" ? "use 不是 fetch"
+      : null;
+    if (错因) {
+      取件签名.错++;
+      取件签名.错因.push(错因);
+      记("第二版取件被拒", { 错因 });
+      return json(res, 403, { error: 错因 });
+    }
+    取件签名.对++;
+    记("第二版取件", { 版本: 文档.版本 });
+    res.writeHead(200, {
+      "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "content-length": 文档.字节.length,
+      "cache-control": "no-store",
+    });
+    return res.end(文档.字节);
+  }
+
+  // ── 第二版：回调 ──
+  // 成功照 ONLYOFFICE Docs 的约定回 {"error":0}，外加新版本号；冲突回 409 与一段给人看的话，
+  // 接入后端要把它原样转给接入页。
+  if (p === "/oo/callback" && req.method === "POST") {
+    const 块 = [];
+    for await (const c of req) 块.push(c);
+    let token = "";
+    try { token = JSON.parse(Buffer.concat(块).toString("utf8")).token; } catch { /* 下面拒 */ }
+    const v = 密钥 ? verify(token, 密钥) : { ok: false, why: "没配密钥" };
+    if (!v.ok) { 记("回调令牌不对", { why: v.why }); return json(res, 401, { error: 1, message: "回调令牌不对：" + v.why }); }
+    const 载荷 = v.payload;
+    回调.push({ status: 载荷.status, forcesavetype: 载荷.forcesavetype, baseVersion: 载荷.baseVersion, key: 载荷.key, users: 载荷.users });
+    if (!发过的key.has(载荷.key)) return json(res, 403, { error: 1, message: "不认得这个 key" });
+    if (载荷.status !== 6) return json(res, 200, { error: 0 });
+    if (载荷.baseVersion !== 文档.版本) {
+      记("第二版存件撞冲突", { 基准: 载荷.baseVersion, 当前: 文档.版本 });
+      return json(res, 409, {
+        error: 1,
+        message:
+          "这份文档在你编辑期间已经被保存过（你打开的是第 " + 载荷.baseVersion + " 版，现在是第 " + 文档.版本 +
+          " 版）。这个编辑器不支持多人同时编辑，直接覆盖会把别人的改动整份丢掉。你的这一份可以先存到本地。",
+      });
+    }
+    const r = await fetch(载荷.url).catch((e) => ({ ok: false, status: 0, text: async () => String(e) }));
+    if (!r.ok) {
+      记("取暂存件失败", { 状态: r.status });
+      return json(res, 502, { error: 1, message: "取不到暂存的那份：" + r.status });
+    }
+    const 字节 = Buffer.from(await r.arrayBuffer());
+    if (!字节.length) return json(res, 400, { error: 1, message: "空的" });
+    文档.字节 = 字节;
+    文档.版本 += 1;
+    记("第二版存件", { 新版本: 文档.版本, 字节: 字节.length });
+    return json(res, 200, { error: 0, version: 文档.版本 });
+  }
+
   // ── 判据用：它到底看到了什么 ──
   if (p === "/_probe/state") {
     return json(res, 200, {
@@ -283,6 +406,9 @@ const server = http.createServer(async (req, res) => {
       // **判「每次现要」用这两个数**：收到 N 次请求就该有 N 份互不相同的凭据。
       收到过的凭据数: 凭据流水.length,
       互不相同的凭据数: new Set(凭据流水).size,
+      取件签名,
+      回调,
+      没有的路径,
       事件,
     });
   }
@@ -292,6 +418,12 @@ const server = http.createServer(async (req, res) => {
     见过的凭据.clear();
     凭据流水.length = 0;
     事件.length = 0;
+    发过的key.clear();
+    取件签名.对 = 0;
+    取件签名.错 = 0;
+    取件签名.错因.length = 0;
+    回调.length = 0;
+    没有的路径.length = 0;
     记("复位");
     return json(res, 200, { ok: true });
   }
@@ -309,6 +441,7 @@ const server = http.createServer(async (req, res) => {
     return res.end(b);
   }
 
+  没有的路径.push(p);
   res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
   res.end("not found: " + p);
 });

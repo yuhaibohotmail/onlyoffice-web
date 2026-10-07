@@ -17,13 +17,21 @@
  *
  * 真实世界里对应的坏法是「令牌到第 16 分钟过期」。它的症状是**存件那一下被拒**，
  * 而那时用户的成果只在 iframe 的内存里——所以这条不是理论问题。
+ *
+ * ── 【2026-10-07 新增】`?protocol=2`：按第二版协议当宿主 ───────────────────
+ *
+ * 这一档里宿主不发地址、不给头，只向 mock 要一张**配置令牌**（mock 那边按 ONLYOFFICE Docs
+ * 的接入协议签），连同接入后端的地址一起递进去。存件被拒、接入页说它还留着那一份时，
+ * 页面上冒出「把我这一份存到本地」那个按钮。
  */
 
 import {
   PROTOCOL,
+  PROTOCOL_V2,
   isProtocolMessage,
   type EmbedFileType,
   type HostMessage,
+  type HostMessageV2,
 } from "./protocol";
 
 const 参数 = new URL(location.href).searchParams;
@@ -43,12 +51,19 @@ const 体积上限 = 参数.has("officeXmlLimitBytes") ? Number(参数.get("offi
  * 而那条断言就成了恒真。
  */
 const 无插件 = 参数.get("noPlugin") === "1";
+/** 按哪一版协议当宿主。不给＝第一版，与加第二版之前逐字一样。 */
+const 协议版本 = 参数.get("protocol") === "2" ? 2 : 1;
+/** 第二版里接入后端在哪。默认本机 3044（实测里那个假后端的端口）。 */
+const 接入后端 = 参数.get("backend") || "http://" + location.hostname + ":3044";
+/** `?download=0`：请 mock 在令牌里写「不许下载」。 */
+const 不许下载 = 参数.get("download") === "0";
 
 const 日志框 = document.getElementById("日志")!;
 const 状态框 = document.getElementById("状态")!;
 const iframe = document.getElementById("接入页") as HTMLIFrameElement;
 const 凭据档位 = document.getElementById("凭据档位") as HTMLSelectElement;
 const 保存钮 = document.getElementById("保存") as HTMLButtonElement;
+const 存到本地钮 = document.getElementById("存到本地") as HTMLButtonElement;
 
 const 插件状态框 = document.getElementById("插件状态")!;
 /**
@@ -140,6 +155,12 @@ window.addEventListener("message", (e) => {
     return;
   }
 
+  if (协议版本 === 2) {
+    // 第二版的宿主只认第二版。接入页那条第一版的 ready 也会到，**这里刻意不理**——
+    // 这正是两版并存的判法：各自只认得自己那一条。
+    if (isProtocolMessage(e.data, PROTOCOL_V2)) 收第二版(e.data as { type: string } & Record<string, unknown>);
+    return;
+  }
   if (!isProtocolMessage(e.data)) return;
   const m = e.data as { type: string } & Record<string, unknown>;
   收到的.push(m);
@@ -279,7 +300,98 @@ async function 发open() {
   说("已发 open，等它打开…");
 }
 
-function 发给接入页(m: HostMessage) {
+// ── 第二版（2026-10-07 新增）────────────────────────────────────────────
+
+/** 接入页打开之后报回来的那三格（全取自接入后端验过的令牌）。 */
+let 打开信息: Record<string, unknown> | null = null;
+
+function 收第二版(m: { type: string } & Record<string, unknown>) {
+  收到的.push(m);
+  if (m.type === "ready") {
+    就绪 = true;
+    记("接入页说它好了（第二版，认得 " + JSON.stringify(m.protocols) + "）→ 向 mock 要一张配置令牌");
+    void 发openV2();
+    return;
+  }
+  if (m.type === "opened") {
+    打开信息 = m;
+    if (typeof m.baseVersion === "number") 基准版 = m.baseVersion;
+    记("打开了：mode=" + m.mode + "，allowDownload=" + m.allowDownload + "，基准版 " + m.baseVersion);
+    说("已打开（" + m.mode + (m.allowDownload ? "" : "，不许下载") + "）");
+    return;
+  }
+  if (m.type === "saved") {
+    上次存件 = { version: (m.version as number) ?? null, size: (m.size as number) ?? 0 };
+    if (typeof m.version === "number") 基准版 = m.version;
+    存到本地钮.hidden = true;
+    记("存回去了：第 " + String(m.version) + " 版，" + m.size + " 字节");
+    说("已保存（第 " + String(m.version) + " 版）");
+    保存钮.disabled = false;
+    return;
+  }
+  if (m.type === "failed") {
+    上次失败 = m;
+    记("出事了（" + m.stage + "，" + String(m.status ?? "") + "，来自 " + String(m.from ?? "接入页") + "）：" + String(m.message));
+    // ⚠ 接入页说它还留着那一份，才给「存到本地」。**不看 allowDownload**：那是这个人自己刚改的内容。
+    存到本地钮.hidden = m.unsavedKept !== true;
+    说(
+      m.stage === "save"
+        ? "⚠ 没存上（" + (m.status ?? "?") + "）。" +
+            (m.unsavedKept ? "你的这一份还在编辑器里 —— 点「把我这一份存到本地」。" : "") +
+            "原文：" + String(m.body ?? m.message).slice(0, 300)
+        : "出事了（" + m.stage + "）：" + String(m.message),
+    );
+    保存钮.disabled = false;
+  }
+}
+
+/**
+ * 向 mock 要一张配置令牌，连同接入后端的地址递进去。
+ *
+ * ⚠ 真实的宿主里**签令牌的是宿主的后端**，前端只是转递。这里 mock 收下前端说的插件配置
+ * 与「许不许下载」再签，只是为了让实测能切换这两格。
+ */
+async function 发openV2() {
+  const guid = 无插件 ? null : await 取插件guid();
+  const 插件配置 = guid
+    ? {
+        pluginsData: [插件配置地址],
+        autostart: [guid],
+        options: { [guid]: { 来自: "宿主页（第二版，经配置令牌）", 记号: "options-" + Date.now(), 文档: "poc-种子.docx" } },
+      }
+    : undefined;
+  let token = "";
+  try {
+    const r = await fetch(location.origin + "/oo/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ plugins: 插件配置, download: !不许下载 }),
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status + " " + (await r.text()).slice(0, 200));
+    token = (await r.json()).token;
+  } catch (e) {
+    记("要配置令牌失败（" + String(e) + "）——这个 mock 还不会当第二版的宿主？");
+    说("要不到配置令牌：" + String(e));
+    return;
+  }
+  记("拿到配置令牌，递给接入页（接入后端在 " + 接入后端 + "）");
+  发给接入页({
+    protocol: PROTOCOL_V2,
+    type: "open",
+    token,
+    backendUrl: 接入后端,
+    ...(体积上限 !== null ? { officeXmlLimitBytes: 体积上限 } : {}),
+    /**
+     * ⚠ **下面这几格是故意塞的噪声**，第二版的接入页必须一个都不看：
+     * 它们是第一版的明文字段，值全是错的（只读、一个不存在的取件地址、一个假的基准版）。
+     * 文档照样按令牌里的打开、能编辑、取件走接入后端，才说明「只认令牌里的值」是真的。
+     */
+    ...({ fileName: "明文.docx", readOnly: true, downloadUrl: location.origin + "/明文取件", allowDownload: true, baseVersion: 999 } as object),
+  } as HostMessageV2);
+  说("已发 open（第二版），等它打开…");
+}
+
+function 发给接入页(m: HostMessage | HostMessageV2) {
   // ⚠ targetOrigin 写死接入页那个源，**永远不要写 "*"**
   // ——那是把凭据广播给此刻恰好占着那个 frame 的任何文档。
   iframe.contentWindow?.postMessage(m, new URL(接入页地址).origin);
@@ -297,7 +409,12 @@ function 发给接入页(m: HostMessage) {
   // 跨源读 `iframe.contentWindow.__embed` 拿到的是 undefined，
   // 而 `undefined?.save?.()` 是合法的 —— 于是**点了什么都不发生，一个错都不报**。
   // 第一版就是那么写的，这条注释是那次的产物。
-  发给接入页({ protocol: PROTOCOL, type: "save" });
+  发给接入页(协议版本 === 2 ? { protocol: PROTOCOL_V2, type: "save" } : { protocol: PROTOCOL, type: "save" });
+});
+
+存到本地钮.addEventListener("click", () => {
+  发给接入页({ protocol: PROTOCOL_V2, type: "download-unsaved" });
+  记("请接入页把没存上的那一份存到本地");
 });
 
 /** 自动实测从这里驱动，走的路与人点按钮完全一样。 */
@@ -320,6 +437,12 @@ function 发给接入页(m: HostMessage) {
     凭据档位.value = v;
     开场那一份 = null;
   },
+  /** 第二版：请接入页把没存上的那一份存到本地（与点那个按钮同一条路）。 */
+  downloadUnsaved: () => 存到本地钮.click(),
+  /** 第二版的状态。 */
+  stateV2: () => ({ 协议版本, 打开信息, 基准版, 上次存件, 上次失败, 收到的: 收到的.map((m) => m.type), 存到本地钮可见: !存到本地钮.hidden }),
+  /** 原样发一条消息给接入页。只给实测用：验「这一页锁定了第二版之后，第一版的消息不理」。 */
+  sendRaw: (m: unknown) => 发给接入页(m as HostMessage),
 };
 
 记("接入页地址：" + 接入页地址);
