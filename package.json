@@ -2,7 +2,7 @@
   "name": "onlyoffice-web",
   "private": true,
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "AGPL-3.0-only",
   "description": "A browser-only ONLYOFFICE front-end component, built from the Community Edition. A modified version of ONLYOFFICE, developed by Ascensio System SIA.",
   "scripts": {
