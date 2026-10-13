@@ -1,5 +1,5 @@
 /**
- * 第 5 问：**宿主能不能把一个自己的插件下发给编辑器，并给它递一格配置。**
+ * 第 6 问：**宿主能不能把一个自己的插件下发给编辑器，并给它递一格配置。**
  *
  * ── 为什么这一问与第 1 问是两件事 ──────────────────────────────────────
  *
@@ -10,6 +10,7 @@
  *   通道二：**编辑器配置**里的 `editorConfig.plugins`（pluginsData / autostart / **options**）
  *           ——`options` 是**宿主给插件下发配置的唯一通道**，
  *           真实部署里放的正是插件访问它自己后端要用的凭证。**这一问验的是它。**
+ *           它由宿主签进配置令牌（`editorConfig.plugins`），接入页原样交给组件。
  *
  * 通道二才是接真后端时要紧的那条：**能带凭证的只有它**。
  * 而且它不经那个静态宿主，所以「纯静态」那件事对它没有影响。
@@ -24,14 +25,15 @@
  * 那时**不该有任何插件报到**。没有这一组的话，「插件报到了」可能是镜像自带那 11 个
  * 里的某一个碰巧也在报——那条断言就成了恒真。
  *
- * 跑法（两个服务器都要起着）：
- *   node embed-poc/probe/plugin-channel.mjs
+ * 跑法：由 run.mjs 起好静态服务器、mock 与接入后端之后调用。
+ *   node embed-poc/probe/plugin-channel.mjs <宿主> <静态> <接入后端>
  */
 
 import { chromium } from "playwright";
 
 const 宿主 = (process.argv[2] || "http://127.0.0.1:3043").replace(/\/+$/, "");
 const 静态 = (process.argv[3] || "http://127.0.0.1:3042").replace(/\/+$/, "");
+const 接入后端 = (process.argv[4] || "http://127.0.0.1:3044").replace(/\/+$/, "");
 
 const 条目 = [];
 function 断言(名, 真, 详 = "") {
@@ -52,7 +54,8 @@ async function 跑一趟(下发插件) {
   });
 
   const 地址 =
-    宿主 + "/?embedOrigin=" + encodeURIComponent(静态) + (下发插件 ? "" : "&noPlugin=1");
+    宿主 + "/?embedOrigin=" + encodeURIComponent(静态) + "&backend=" + encodeURIComponent(接入后端) +
+    (下发插件 ? "" : "&noPlugin=1");
   await 页.goto(地址, { waitUntil: "domcontentloaded", timeout: 60000 });
 
   await 页
@@ -98,7 +101,7 @@ if (甲.取不到的.length) {
  * ⚠ **编辑器交给插件的 `Asc.plugin.info.options` 已经把 guid 那一层剥掉了。**
  * 宿主那边放的是 `options: { "<guid>": { 来自, 记号, … } }`，
  * 而插件读到的直接就是 `{ 来自, 记号, … }`。
- * 第一版这里按嵌套去取，结果拿到 `undefined` ——
+ * 最早这里按嵌套去取，结果拿到 `undefined` ——
  * 而那时前两条断言是绿的，**看起来像「收到了但内容不对」，其实是判据写错了**。
  */
 function 取来自(报告) {

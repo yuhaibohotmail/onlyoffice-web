@@ -1,5 +1,5 @@
 /**
- * 第 6 问：**界面上那个法律声明入口，点开之后那四条链接真的能到东西吗。**
+ * 第 7 问：**界面上那个法律声明入口，点开之后那四条链接真的能到东西吗。**
  *
  * ── 为什么这一条必须有 ──────────────────────────────────────────────────
  *
@@ -29,8 +29,8 @@
  * ⚠ ③刻意**不去网上取那个地址**：那会把这条实测绑到外网，
  * 而它要验的是「配没配」，不是「GitHub 通不通」。
  *
- * 跑法（静态服务器起着就行）：
- *   node embed-poc/probe/legal-links.mjs [静态地址]
+ * 跑法：由 run.mjs 起好静态服务器、mock 与接入后端之后调用（编辑器要真打开，入口才挂得上）。
+ *   node embed-poc/probe/legal-links.mjs <静态> <宿主> <接入后端>
  */
 
 import { readFileSync } from "node:fs";
@@ -39,6 +39,7 @@ import { chromium } from "playwright";
 
 const 静态 = (process.argv[2] || "http://127.0.0.1:3042").replace(/\/+$/, "");
 const 宿主源 = process.argv[3] || "http://127.0.0.1:3043";
+const 接入后端 = (process.argv[4] || "http://127.0.0.1:3044").replace(/\/+$/, "");
 
 const 条目 = [];
 function 断言(名, 真, 详 = "") {
@@ -52,14 +53,14 @@ const 页 = await 浏览器.newPage({ viewport: { width: 1400, height: 900 } });
 /**
  * 走**真的宿主页**（不是自己给接入页发消息）。
  *
- * ⚠ 第一版是直接开接入页、再从那一页自己 postMessage 一条 open。两次都不行，
+ * ⚠ 最早是直接开接入页、再从那一页自己 postMessage 一条 open。两次都不行，
  * 而且两次的原因不一样、都值得记：
  *   ① `hostOrigin` 声明成了 mock 那个源，于是自发的消息被来源校验**正确地拒了**；
- *   ② 改成信本页之后 open 收下了，但**没人答 `need-headers`**，接入页等 10 秒超时，
- *      文档没打开 —— 而**法律入口是随编辑器挂上的**，编辑器不出来就没有它。
+ *   ② 改成信本页之后 open 收下了，但**宿主那一侧没人答话**，文档没打开
+ *      —— 而**法律入口是随编辑器挂上的**，编辑器不出来就没有它。
  * 两次的样子都是「四条断言全红而产品一点毛病没有」。
  */
-const 地址 = 宿主源 + "/?embedOrigin=" + encodeURIComponent(静态);
+const 地址 = 宿主源 + "/?embedOrigin=" + encodeURIComponent(静态) + "&backend=" + encodeURIComponent(接入后端);
 await 页.goto(地址, { waitUntil: "domcontentloaded", timeout: 60000 });
 
 /** 法律入口挂在**接入页那一层**的 `.onlyoffice-container` 上，不在最外层。 */

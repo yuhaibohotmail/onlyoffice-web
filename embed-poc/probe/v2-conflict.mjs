@@ -1,8 +1,8 @@
 /**
- * 第 8 问：**两个人先后存，后存的那个被拒、不丢数。**（2026-10-07 新增，第二版协议）
+ * 第 3 问：**两个人先后存，后存的那个被拒、不丢数。**（2026-10-07 新增）
  *
  * 这个编辑器不支持多人同时编辑。两个人各开同一份、各自改、先后保存时，后存的那个基于旧版本，
- * **直接覆盖会把先存的那一份整个丢掉，而两边都显示成功**。第二版里防这件事的是 `baseVersion`：
+ * **直接覆盖会把先存的那一份整个丢掉，而两边都显示成功**。防这件事的是 `baseVersion`：
  * 宿主把它签进配置令牌，接入后端在回调里原样带回，宿主比一下，不符就拒（mock 回 409）。
  *
  * ── 判据 ────────────────────────────────────────────────────────────────
@@ -40,9 +40,8 @@ function 断言(名, 真, 详 = "") {
 
 const 状态 = async () => (await fetch(宿主 + "/_probe/state")).json();
 async function 取当前文档() {
-  const r = await fetch(宿主 + "/file", {
-    headers: { Authorization: "Bearer probe-" + Math.random().toString(36).slice(2) },
-  });
+  // 探针专用的那条：不核签名，原样给宿主手里此刻那份字节。
+  const r = await fetch(宿主 + "/_probe/file");
   return Buffer.from(await r.arrayBuffer());
 }
 
@@ -54,11 +53,11 @@ const 编辑器选择器 = ".onlyoffice-container > iframe:not([data-onlyoffice-
 async function 开一页(名, 额外参数) {
   const 页 = await 浏览器.newPage({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
   const 地址 =
-    宿主 + "/?protocol=2&embedOrigin=" + encodeURIComponent(静态) + "&backend=" + encodeURIComponent(接入后端) + 额外参数;
+    宿主 + "/?embedOrigin=" + encodeURIComponent(静态) + "&backend=" + encodeURIComponent(接入后端) + 额外参数;
   console.log("打开" + 名 + "：" + 地址);
   await 页.goto(地址, { waitUntil: "domcontentloaded", timeout: 60000 });
   await 页
-    .waitForFunction(() => window.__host?.stateV2?.().打开信息 || window.__host?.stateV2?.().上次失败, null, { timeout: 120000 })
+    .waitForFunction(() => window.__host?.state?.().打开信息 || window.__host?.state?.().上次失败, null, { timeout: 120000 })
     .catch(() => {});
   await 页.frameLocator("#接入页").locator(编辑器选择器).waitFor({ state: "attached", timeout: 120000 }).catch(() => {});
   await 页.waitForTimeout(6000);
@@ -84,18 +83,18 @@ async function 存(页) {
   await 页.evaluate(() => window.__host.save());
   await 页
     .waitForFunction(() => {
-      const s = window.__host.stateV2();
+      const s = window.__host.state();
       return !!s.上次存件 || !!s.上次失败;
     }, null, { timeout: 120000 })
     .catch(() => {});
-  return 页.evaluate(() => window.__host.stateV2());
+  return 页.evaluate(() => window.__host.state());
 }
 
 // 两个人都在 mock 还是第 1 版时打开。
 const 甲 = await 开一页("甲", "");
 const 乙 = await 开一页("乙（不许下载）", "&download=0");
-const 甲开 = await 甲.evaluate(() => window.__host.stateV2().打开信息);
-const 乙开 = await 乙.evaluate(() => window.__host.stateV2().打开信息);
+const 甲开 = await 甲.evaluate(() => window.__host.state().打开信息);
+const 乙开 = await 乙.evaluate(() => window.__host.state().打开信息);
 断言("两个人都基于第 1 版打开", 甲开?.baseVersion === 1 && 乙开?.baseVersion === 1, JSON.stringify([甲开, 乙开]));
 断言("乙的令牌不许下载 → 乙那边 allowDownload 为 false", 乙开?.allowDownload === false);
 
@@ -114,7 +113,7 @@ const 失败 = 乙存.上次失败;
   JSON.stringify(失败 || 乙存.上次存件).slice(0, 300),
 );
 断言("② 宿主页上出现了「把我这一份存到本地」", 乙存.存到本地钮可见 === true);
-断言("（对照）甲那边没有这个按钮", (await 甲.evaluate(() => window.__host.stateV2())).存到本地钮可见 === false);
+断言("（对照）甲那边没有这个按钮", (await 甲.evaluate(() => window.__host.state())).存到本地钮可见 === false);
 
 // ③ mock 那份没被覆盖
 const s = await 状态();

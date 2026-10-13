@@ -1,20 +1,18 @@
 /**
- * 第 7 问：**第二版协议那条链走不走得通。**（2026-10-07 新增）
+ * 第 2 问：**接入页那条链走不走得通。**（2026-10-07 新增；0.3.0 起这是唯一的一版）
  *
- * 整条链：宿主起 iframe → 接入页各发一条 ready → 宿主（第二版）向 mock 要一张配置令牌，
+ * 整条链：宿主起 iframe → 接入页发 ready → 宿主向 mock 要一张配置令牌，
  * 连同接入后端地址发 open → 接入页把令牌交给接入后端验 → 接入后端带签名去 mock 取件 →
  * 组件打开 → **真键盘敲字** → 导出 → 交给接入后端 → 接入后端暂存、带签名回调 mock →
  * mock 来取暂存的那份、存下 → 回调答复一路回到宿主。
  *
  * ── 判据 ────────────────────────────────────────────────────────────────
  *
- * 与第一版那一趟同一个原则：**取 mock 手里那份字节**，不取界面上写了什么。另外几条：
- *   · open 里故意塞了第一版的明文（只读、假的取件地址、假的基准版 999），
- *     打开之后必须是**可编辑**、基准版 **1**，而且 mock 从没被要过那个假地址
- *     ——这才说明「只认令牌里的值」；
+ * **取 mock 手里那份字节**，不取界面上写了什么——「界面说存好了」和「存好了」是两件事。另外几条：
+ *   · 打开之后是**可编辑**、基准版 **1**（都取自令牌）；
  *   · mock 收到的每一次取件签名都对（`payload.url` 等于它自己看到的地址、带 `use`、带 `exp`）；
  *   · 回调是 status 6、forcesavetype 1、带回基准版 1；
- *   · **锁定**：这一页按第二版打开之后，宿主再发一条**第一版**的 save，必须什么都不发生；
+ *   · 打开之后宿主再发一条**第一版**（0.3.0 已删）的 save，必须什么都不发生；
  *   · 同一个会话里再存一次也成功（基准版往前走了，否则第二次必然撞冲突）。
  *
  * 跑法：由 run.mjs 起好静态服务器、mock 与接入后端之后调用。
@@ -48,9 +46,8 @@ async function 问mock(路径, 选项) {
 }
 
 async function 取当前文档() {
-  const r = await fetch(宿主 + "/file", {
-    headers: { Authorization: "Bearer probe-" + Math.random().toString(36).slice(2) },
-  });
+  // 探针专用的那条：不核签名，原样给宿主手里此刻那份字节。
+  const r = await fetch(宿主 + "/_probe/file");
   if (!r.ok) throw new Error("探针自己取件失败 " + r.status);
   return Buffer.from(await r.arrayBuffer());
 }
@@ -65,29 +62,25 @@ const 编辑器选择器 = ".onlyoffice-container > iframe:not([data-onlyoffice-
 const 接入页 = 页.frameLocator("#接入页");
 
 const 地址 =
-  宿主 + "/?protocol=2&embedOrigin=" + encodeURIComponent(静态) + "&backend=" + encodeURIComponent(接入后端);
-console.log("打开宿主页（第二版）" + 地址);
+  宿主 + "/?embedOrigin=" + encodeURIComponent(静态) + "&backend=" + encodeURIComponent(接入后端);
+console.log("打开宿主页 " + 地址);
 await 页.goto(地址, { waitUntil: "domcontentloaded", timeout: 60000 });
 
 // ── 打开 ────────────────────────────────────────────────────────────────
 
 let 打开信息 = null;
 try {
-  await 页.waitForFunction(() => window.__host?.stateV2?.().打开信息 || window.__host?.stateV2?.().上次失败, null, {
+  await 页.waitForFunction(() => window.__host?.state?.().打开信息 || window.__host?.state?.().上次失败, null, {
     timeout: 120000,
   });
 } catch {
   /* 下面报 */
 }
-const 开后 = await 页.evaluate(() => window.__host.stateV2());
+const 开后 = await 页.evaluate(() => window.__host.state());
 打开信息 = 开后.打开信息;
-断言("接入页按第二版打开了（宿主收到 opened）", !!打开信息, JSON.stringify(打开信息 || 开后.上次失败).slice(0, 300));
-断言(
-  "**只认令牌**：open 里明文写着只读，打开的却是可编辑（令牌里是 edit）",
-  打开信息?.mode === "edit",
-  "mode=" + 打开信息?.mode,
-);
-断言("**只认令牌**：明文基准版 999 被忽略，用的是令牌里的 1", 打开信息?.baseVersion === 1, "baseVersion=" + 打开信息?.baseVersion);
+断言("接入页打开了（宿主收到 opened）", !!打开信息, JSON.stringify(打开信息 || 开后.上次失败).slice(0, 300));
+断言("令牌里是 edit → 打开的是可编辑", 打开信息?.mode === "edit", "mode=" + 打开信息?.mode);
+断言("令牌里的基准版是 1", 打开信息?.baseVersion === 1, "baseVersion=" + 打开信息?.baseVersion);
 断言("令牌里许下载 → allowDownload 为 true", 打开信息?.allowDownload === true);
 
 let 编辑器起来了 = false;
@@ -105,11 +98,6 @@ const 开后mock = (await 问mock("/_probe/state")).体;
   "mock 收到的取件签名全对（payload.url 等于它看到的地址、use=fetch、有 exp）",
   开后mock.取件签名?.对 >= 1 && 开后mock.取件签名?.错 === 0,
   JSON.stringify(开后mock.取件签名),
-);
-断言(
-  "明文里那个假取件地址从没被要过",
-  !(开后mock.没有的路径 || []).some((p) => p.includes("明文取件")),
-  JSON.stringify(开后mock.没有的路径 || []),
 );
 
 // ── 敲字、存件 ──────────────────────────────────────────────────────────
@@ -133,7 +121,7 @@ async function 存一次() {
   try {
     await 页.waitForFunction(
       () => {
-        const s = window.__host.stateV2();
+        const s = window.__host.state();
         return !!s.上次存件 || !!s.上次失败;
       },
       null,
@@ -142,7 +130,7 @@ async function 存一次() {
   } catch {
     /* 下面报 */
   }
-  return 页.evaluate(() => window.__host.stateV2());
+  return 页.evaluate(() => window.__host.state());
 }
 
 const 存后 = await 存一次();
@@ -164,13 +152,13 @@ const 回调 = (mock状态.回调 || [])[0];
   JSON.stringify(回调),
 );
 
-// ── 锁定：第一版的 save 必须不理 ─────────────────────────────────────────
+// ── 第一版（0.3.0 已删）的 save 必须不理 ─────────────────────────────────
 
 await 页.evaluate(() => window.__host.sendRaw({ protocol: "onlyoffice-web-embed/1", type: "save" }));
 await 页.waitForTimeout(8000);
 const 锁后 = (await 问mock("/_probe/state")).体;
 断言(
-  "**锁定**：按第二版打开之后，第一版的 save 什么都没触发",
+  "第一版（已删）的 save 什么都没触发",
   锁后.版本 === 2 && (锁后.回调 || []).length === 1,
   "版本 " + 锁后.版本 + "，回调 " + (锁后.回调 || []).length + " 次",
 );
@@ -183,7 +171,7 @@ let 第二次 = null;
 try {
   await 页.waitForFunction(
     () => {
-      const s = window.__host.stateV2();
+      const s = window.__host.state();
       return s.上次失败 || (s.上次存件 && s.上次存件.version === 3);
     },
     null,
@@ -192,7 +180,7 @@ try {
 } catch {
   /* 下面报 */
 }
-第二次 = await 页.evaluate(() => window.__host.stateV2());
+第二次 = await 页.evaluate(() => window.__host.state());
 断言(
   "同一个会话里第二次存也成功（基准版往前走了）",
   第二次.上次存件?.version === 3 && !第二次.上次失败,

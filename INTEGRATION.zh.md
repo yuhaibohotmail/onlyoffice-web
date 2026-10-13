@@ -5,9 +5,9 @@
 这份是**接入页**（`embed-poc/embed.html`，在本仓库）与**接入后端**（不在本仓库）之间的约定。
 接入后端谁来写、用什么语言写都行；接入页只依赖这里写下的东西。
 
-嵌入协议第一版不需要任何后端（宿主把地址和请求头递给接入页，见 `embed-poc/src/protocol.ts`）。
 第二版是给已经讲 **ONLYOFFICE Docs 接入协议（子集）** 的宿主用的：它签一份编辑器配置、
 在 `document.url` 上给文件、在 `callbackUrl` 上收存件。在这样的宿主眼里，接入页加接入后端就是又一台文档服务器。
+接入页只讲这一版：第一版（宿主把地址和请求头递给接入页，不要后端）已于 0.3.0 删除。
 
 ## 1. 谁做什么
 
@@ -55,8 +55,7 @@
 | `editorConfig.plugins` | 否 | 原样交给编辑器 |
 | `exp` | 是 | 过期时刻（秒）。令牌只要活到接入页开完会话就行，几分钟到 20 分钟都常见 |
 
-**只认令牌。** `open` 消息里可以带别的字段（第一版的宿主会发 `fileName`、`downloadUrl`、`readOnly`、
-`allowDownload`、`plugins`、`baseVersion`），第二版里接入页与接入后端一个都不看。
+**只认令牌。** `open` 消息里可以带别的字段，接入页与接入后端一个都不看。
 
 ## 3. 嵌入协议第二版（宿主页面 ↔ 接入页）
 
@@ -70,7 +69,7 @@
 | 宿主 → 接入页 | `open` | `token`（配置令牌）；`backendUrl?`（见下）；`officeXmlLimitBytes?`；`lang?`（界面偏好，令牌里有 `editorConfig.lang` 时以令牌为准） |
 | 宿主 → 接入页 | `save` | – |
 | 宿主 → 接入页 | `download-unsaved` | –。把上次被拒的那一份存成本地文件（第 6 节） |
-| 接入页 → 宿主 | `ready` | `protocols: ["onlyoffice-web-embed/1", "onlyoffice-web-embed/2"]` |
+| 接入页 → 宿主 | `ready` | `protocols: ["onlyoffice-web-embed/2"]` |
 | 接入页 → 宿主 | `opened` | `mode`（`"edit"`/`"view"`）、`allowDownload`、`baseVersion`（都取自验过的令牌） |
 | 接入页 → 宿主 | `saved` | `version`（宿主回调答复里的，没有就是 `null`）、`size` |
 | 接入页 → 宿主 | `failed` | `stage`（`open`/`session`/`download`/`export`/`save`/`download-unsaved`）、`message`、`status?`、`body?`、`from?`（`"host"`/`"backend"`）、`unsavedKept` |
@@ -79,10 +78,9 @@
 同一路径前缀：接入页在 `https://example.com/oow/embed.html`，就调 `https://example.com/oow/api/session`。
 这是本来的部署方式（不跨源、不多一个源）。
 
-**第一版与第二版并存。** 接入页一加载就发**两条** `ready`，一个协议名一条。宿主比协议名是全等，
-所以第一版的宿主只看得到第一版那条，第二版的只看得到第二版那条。**第一条 `open` 说了算**：
-这一页按那一版走到底，另一版的消息一律不理。第一版的 `need-headers` / `headers` 一问一答在第二版里没有了：
-用户的凭据不再进 iframe。
+**一条 `ready`，一条 `open`。** 接入页一加载就发一条 `ready`；宿主必须等到它再发 `open`（接入页挂上监听之前发过去的消息
+会无声地丢掉）。接入页只收第一条 `open`，别的协议名的消息一律不理，第一版的（`onlyoffice-web-embed/1`）也一样。
+用户的凭据不进 iframe：接入页手里只有接入后端发的会话凭据。
 
 ## 4. 接入后端的 HTTP 接口（接入页 → 接入后端）
 
@@ -251,7 +249,7 @@
 
 ## 9. 怎么验一个实现
 
-`npm run poc:e2e` 在真浏览器里把接入页按两版协议各走一遍。第二版用的是 `embed-poc/server/fake-backend.mjs`，
+`npm run poc:e2e` 在真浏览器里把接入页走一遍。用的是 `embed-poc/server/fake-backend.mjs`，
 一个刻意从简的**实测用假后端**（暂存放内存、不定时清理、不能拿去部署），宿主由 `embed-poc/server/mock-host.mjs` 扮演。
-第 ⑦⑧ 两趟断言的包括：接入页只认令牌、不看明文字段；每一次取件签名都与宿主看到的地址一致；回调是 status 6、
+第 ②③ 两趟断言的包括：接入页按令牌里的模式与基准版打开；每一次取件签名都与宿主看到的地址一致；回调是 status 6、
 带着对的 `baseVersion`；基于旧版本的存件被宿主以 409 拒掉、宿主那份没被覆盖；被拒的那一份能存到本地。

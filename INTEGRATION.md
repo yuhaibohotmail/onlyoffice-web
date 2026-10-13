@@ -6,10 +6,10 @@ This is the contract between the **embed page** (`embed-poc/embed.html`, in this
 **integration backend** (not in this repository). Anyone may implement the backend, in any language;
 the embed page relies on nothing but what is written here.
 
-Version 1 of the embed protocol needs no backend at all (the host hands the page URLs and request headers;
-see `embed-poc/src/protocol.ts`). Version 2 exists for hosts that already speak a **subset of the
-ONLYOFFICE Docs integration protocol**: they sign an editor configuration, serve the file at `document.url`,
-and take saves on `callbackUrl`. To such a host, embed page + backend look like one more document server.
+Version 2 is for hosts that already speak a **subset of the ONLYOFFICE Docs integration protocol**: they sign an
+editor configuration, serve the file at `document.url`, and take saves on `callbackUrl`. To such a host, embed
+page + backend look like one more document server. It is the only version the embed page speaks: version 1 (the
+host handed the page URLs and request headers, no backend) was removed in 0.3.0.
 
 ## 1. Who does what
 
@@ -59,9 +59,8 @@ it; it passes it to the backend unchanged.
 | `editorConfig.plugins` | no | Passed to the editor untouched |
 | `exp` | yes | Expiry (seconds since the epoch). The token only has to live until the page has opened the session; a few minutes to 20 minutes is usual |
 
-**Only the token counts.** The `open` message may carry other fields (a version 1 host sends `fileName`,
-`downloadUrl`, `readOnly`, `allowDownload`, `plugins`, `baseVersion`); in version 2 none of them is read, by
-the page or by the backend.
+**Only the token counts.** The `open` message may carry other fields; none of them is read, by the page or by
+the backend.
 
 ## 3. Embed protocol v2 (host page ↔ embed page)
 
@@ -76,7 +75,7 @@ Protocol name: `onlyoffice-web-embed/2`. Every message is `{ "protocol": "onlyof
 | host → page | `open` | `token` (the config token); `backendUrl?` (see below); `officeXmlLimitBytes?`; `lang?` (a UI preference; the token's `editorConfig.lang` wins) |
 | host → page | `save` | – |
 | host → page | `download-unsaved` | – . Save the copy that was refused last time to a local file (section 6) |
-| page → host | `ready` | `protocols: ["onlyoffice-web-embed/1", "onlyoffice-web-embed/2"]` |
+| page → host | `ready` | `protocols: ["onlyoffice-web-embed/2"]` |
 | page → host | `opened` | `mode` (`"edit"`/`"view"`), `allowDownload`, `baseVersion` (all from the verified token) |
 | page → host | `saved` | `version` (from the host's callback answer, or `null`), `size` |
 | page → host | `failed` | `stage` (`open`/`session`/`download`/`export`/`save`/`download-unsaved`), `message`, `status?`, `body?`, `from?` (`"host"`/`"backend"`), `unsavedKept` |
@@ -85,11 +84,10 @@ Protocol name: `onlyoffice-web-embed/2`. Every message is `{ "protocol": "onlyof
 backend is assumed on the embed page's own origin and path prefix: a page served at `https://example.com/oow/embed.html`
 calls `https://example.com/oow/api/session`. That is the intended deployment (no CORS, no extra origin).
 
-**Version 1 and version 2 side by side.** On load the page posts **two** `ready` messages, one per protocol
-name. A host compares the protocol name exactly, so a version 1 host only sees the version 1 `ready` and a
-version 2 host only the version 2 one. **The first `open` decides**: the page follows that protocol to the end
-and ignores every message of the other one. Version 1's `need-headers` / `headers` exchange does not exist in
-version 2: the user's credentials never enter the iframe.
+**One `ready`, one `open`.** On load the page posts one `ready`; the host must wait for it before sending
+`open` (a message posted before the page's listener is attached is silently lost). The page accepts only the first
+`open` and ignores messages with any other protocol name, including version 1's (`onlyoffice-web-embed/1`). The
+user's credentials never enter the iframe: the page holds only the backend's session credential.
 
 ## 4. The backend's HTTP API (embed page → backend)
 
@@ -277,9 +275,9 @@ What follows is the reference practice behind this contract, not something the e
 
 ## 9. Testing an implementation
 
-`npm run poc:e2e` drives the embed page through both protocol versions in a real browser. For version 2 it runs
+`npm run poc:e2e` drives the embed page in a real browser. It runs
 `embed-poc/server/fake-backend.mjs`, a deliberately minimal **test fake** of this contract (in-memory staging,
-no sweeps, not for deployment), against `embed-poc/server/mock-host.mjs` acting as the host. Passes ⑦ and ⑧
-assert, among other things, that the page follows the token and ignores plain fields, that every fetch signature
+no sweeps, not for deployment), against `embed-poc/server/mock-host.mjs` acting as the host. Passes ② and ③
+assert, among other things, that the page opens with the mode and base version from the token, that every fetch signature
 matches the URL the host saw, that the callback is status 6 with the right `baseVersion`, that a stale save is
 refused with the host's 409 without overwriting the stored file, and that the refused copy can be saved locally.

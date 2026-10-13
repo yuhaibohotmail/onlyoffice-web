@@ -305,7 +305,8 @@ small integration backend. It is not the middle path rejected above: it **does n
 browser) and **does not collaborate**. It only lets a host that already speaks the ONLYOFFICE Docs integration protocol
 (config token, `document.url`, signed callback) drive the embed page the same way it drives a document server. It is
 **not part of this repository**: integrators implement it against [INTEGRATION.md](INTEGRATION.md). Without it the
-component still works from plain static hosting (embed protocol version 1), which is reason 2 above, unchanged.
+component itself still works from plain static hosting, which is reason 2 above, unchanged; only the embed page in
+`embed-poc/` needs it, since version 1 of the embed protocol (no backend) was removed in 0.3.0.
 
 So before building that tier, answer one question first: **is saving that one session worth maintaining a second path for opening documents?**
 Answering "yes" is entirely defensible (the first three reasons are real), but write it down;

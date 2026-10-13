@@ -3,13 +3,16 @@
 > English | [中文](README.zh.md)
 
 A **self-contained** example: a host page holds this editor in an iframe, and the two sides talk only through `postMessage`.
-The document is fetched from an address the host provides and, after editing, saved back to an address the host provides.
+The host hands the embed page one signed **config token**; the document is fetched and, after editing, saved back through an
+**integration backend** that the integrator implements against [INTEGRATION.md](../INTEGRATION.md) (embed protocol version 2).
 
-It is also eight live tests, each answering a question you cannot answer without running it (readings are below under "What was measured").
+Version 1 of the protocol (the host handed over a download URL, a save URL and fresh request headers) was removed in 0.3.0.
+
+It is also seven live tests, each answering a question you cannot answer without running it (readings are below under "What was measured").
 
 ```sh
 npm run poc:build     # build the three pages → embed-poc/dist/
-npm run poc:e2e       # start the servers, run all nine passes, stop (one of the passes is **expected to fail**)
+npm run poc:e2e       # start the servers, run all eight passes, stop (one of the passes is **expected to fail**)
 ```
 
 Running the parts individually:
@@ -17,8 +20,12 @@ Running the parts individually:
 ```sh
 npm run poc:plugins                     # pregenerate the plugin registry (the step that belongs at deployment time)
 npm run poc:static -- 3042              # dumb static server (stands in for nginx)
-npm run poc:mock   -- 3043              # mock backend (stands in for the document service; also serves the host page)
-node embed-poc/probe/static-check.mjs   # then open http://127.0.0.1:3043/ in a browser
+node embed-poc/probe/static-check.mjs   # needs only the static server
+
+# to edit a document by hand, also start the mock host and the fake integration backend with one shared secret
+# (at least 32 characters), then open http://127.0.0.1:3043/ in a browser
+OOW_JWT_SECRET=<secret> npm run poc:mock -- 3043
+OOW_JWT_SECRET=<secret> OOW_ALLOWED_ORIGINS=http://127.0.0.1:3042 node embed-poc/server/fake-backend.mjs 3044
 ```
 
 ---
@@ -35,9 +42,9 @@ It consumes only two things: **the component itself** (`src/`) and **the static 
 (replacing the relative addresses in the on-disk copy with absolute addresses). Using a server that rewrites the registry to check
 "can plain static hosting serve the plugin panel?" only tests that server itself.
 
-**② Knows no specific backend.** The contract (`src/protocol.ts`) states only four neutral things:
-where to fetch the file, where to save it, which version this is, and which headers to send with requests.
-Write one vendor's backend endpoints or data shapes into it, and this component goes from "anyone can embed it" to "works only with that one vendor".
+**② Knows no specific backend.** The contract (`src/protocol.ts`) carries only a signed config token and where the integration
+backend is; what that backend answers is [INTEGRATION.md](../INTEGRATION.md). Neither names a specific document service.
+Write one vendor's backend endpoints or data shapes into them, and this component goes from "anyone can embed it" to "works only with that one vendor".
 
 ---
 
@@ -47,17 +54,17 @@ Write one vendor's backend endpoints or data shapes into it, and this component 
 |---|---|
 | `src/protocol.ts` | **The entire agreement between host ↔ embed page**. The two sides talk only through this one file |
 | `embed.html` + `src/embed.ts` | **Embed page** — the one that lives inside the iframe; the actual deliverable of this PoC |
-| `index.html` + `src/host.ts` | Host page, standing in for a future business application. It has a switch that is **deliberately wrong**, see below |
+| `index.html` + `src/host.ts` | Host page, standing in for a future business application. It asks the mock for a config token and hands it to the embed page |
 | `static-check.html` + `src/static-check.ts` | Opens only a blank document, **zero fixtures, zero mocks**; answers question 1 on its own |
 | `server/static-server.mjs` | **The dumb half**, stands in for nginx. It only serves files; **there is not a single line of code that rewrites content** |
-| `server/mock-host.mjs` | The mock half, stands in for the document backend. It also builds a minimal docx on the fly (with its own zip writer). For protocol version 2 it also plays a host that speaks the ONLYOFFICE Docs integration protocol (signs the config token, checks fetch signatures, answers callbacks) |
+| `server/mock-host.mjs` | The mock half, stands in for a host backend that speaks the ONLYOFFICE Docs integration protocol: signs the config token, checks fetch signatures, answers callbacks. It also builds a minimal docx on the fly (with its own zip writer) and serves the host page |
 | `server/fake-backend.mjs` | **Test fake** of the integration backend that protocol version 2 needs (the real one is not in this repository; see [INTEGRATION.md](../INTEGRATION.md)). In-memory, minimal, never to be deployed |
 | `server/hs256.mjs` | The HS256 JWT helper the two test servers above share |
 | `server/pregenerate-plugins.mjs` | **The step that belongs at deployment time**: replaces the relative addresses in the plugin registry with absolute paths |
 | `plugin/` | This PoC's own minimal plugin — **it only displays the `options` it receives**, which is the only channel for the host to pass credentials to a plugin. The icon is drawn on the fly by `make-icon.mjs`; no binary is committed |
-| `probe/*.mjs` | Eight live tests + a `run.mjs` that chains them together |
+| `probe/*.mjs` | Seven live tests + a `run.mjs` that chains them together |
 
-**The two backends are two separate processes, not merged.** They stand in for two different things (nginx / document backend)
+**The static server and the mock are two separate processes, not merged.** They stand in for two different things (nginx / host backend)
 and answer two different questions. Once merged, "the plugin panel appeared" can no longer tell you whether the static half was enough
 or the mock half added something extra. **And only separate processes give you cross-origin** — which is exactly what a real deployment looks like.
 
@@ -90,29 +97,24 @@ whereas at deployment time we know which path the build output is mounted under,
 no scheme, domain or port, so **changing the domain, changing the port, or switching http to https does not break it**.
 ⚠ It still contains the **mount prefix**, so the script takes a `--prefix`.
 
-> This case is covered by pass ⑦ of `run.mjs`, and that pass is **expected to fail**. If it passes, something has gone wrong.
+> This case is covered by pass ⑧ of `run.mjs`, and that pass is **expected to fail**. If it passes, something has gone wrong.
 
-### 2. The embed page chain — works, all 11 assertions pass
+### 2. The embed page chain with protocol version 1 (removed in 0.3.0)
 
-Real keyboard typing → export → save back, with the check based on **the bytes on the server side**:
-`1401 → 25172 bytes`, version `1 → 2`, after unpacking the new version **it really contains the marker typed this time**,
-**the old version does not** (negative assertion), and the seed sentence is still there.
+These readings were taken with version 1, where the host handed over a download URL, a save URL and request headers.
+Real keyboard typing → export → save back worked, checked on **the bytes on the server side** (`1401 → 25172 bytes`,
+version `1 → 2`, the new version contains the marker typed this time, the old one does not). Headers were requested fresh
+before every request, and a control group that reused the first one was rejected on the save.
 
-### 3. Credentials are requested fresh each time — yes, and the control group really fails
+⚠ The lesson that carries over to version 2: **editing a document has no time limit, but tokens do**. Version 2 keeps the
+user's token out of the iframe altogether: the page holds only the integration backend's session credential, and gets a new
+one with every successful save. The chain itself is now covered by section 8.
 
-3 requests in one session, 3 mutually distinct credentials.
-After switching to the "get one at the start and use it throughout" variant, **the save is rejected with 401**.
-
-⚠ The real-world counterpart of this failure is **token expiry**: editing a document has no time limit, but tokens do.
-The mock replaces "expired" with "invalidated after one use"; the failure is exactly the same, but visible within one second.
-So the embed page **requests a fresh one from the host right before every request it sends**,
-and the contract **has no place at all to put a token** — you cannot write the "receive one at the start and keep it" mistake.
-
-### 4. Upload is refused when export falls back to the original file — yes, and not a single byte changed on the server
+### 3. Upload is refused when export falls back to the original file — yes, and not a single byte changed on the server
 
 With the size limit pushed down to 1 byte, `exportAsBlob()` returns **the original file as it was opened**
 (the only difference is one extra field, `isOriginalFileFallback`, in the return value). The embed page recognizes it and refuses to upload;
-the mock still shows "version 1, 1401 bytes".
+the mock still shows "version 1, 1401 bytes". (Pass ④; since 0.3.0 it drives protocol version 2.)
 
 ⚠ The consequence of not checking that field is of the worst kind: the server stores the unchanged bytes, the version number moves forward as usual,
 the page shows "saved successfully", **and all of the user's changes from this session are lost**.
@@ -120,7 +122,7 @@ the page shows "saved successfully", **and all of the user's changes from this s
 ⚠ That gate sets its flag at **open** time (the limit is exceeded when x2t converts the input), not only at export time.
 So a document over the limit could not be opened, or not fully opened, in the first place — this test **does not require the editor to appear**.
 
-### 5. The custom plugin channel — works, and can carry configuration
+### 4. The custom plugin channel — works, and can carry configuration
 
 Plugins have **two channels that are unrelated to each other**; do not mix them up:
 
@@ -133,11 +135,12 @@ Plugins have **two channels that are unrelated to each other**; do not mix them 
 In a real deployment, the credentials a plugin needs to access its own backend go in `options`,
 so **channel 2 is the one that matters when connecting to a real backend**. This PoC includes a minimal plugin
 (`plugin/`) that does only one thing: display the `options` it receives and report them to the outermost page.
-Measured: the `{来自:"宿主页", 记号:…}` that the host put in arrived unchanged.
+Measured: the `{来自:"宿主页", 记号:…}` that the host put in arrived unchanged. With protocol version 2 the host signs this
+into the config token (`editorConfig.plugins`) and the embed page hands it to the component untouched (pass ⑥).
 
 ⚠ **The `Asc.plugin.info.options` that the editor hands to the plugin already has the guid level stripped off.**
 The host puts `options: { "<guid>": {…} }`, and what the plugin reads is `{…}` directly.
-The first version of the check read it as nested and got `undefined` — **at that point the first two assertions were green,
+The first draft of the check read it as nested and got `undefined` — **at that point the first two assertions were green,
 which looked like "received, but with the wrong content", when in fact the check itself was written wrong**.
 
 ⚠ The plugin's **guid is read from its own `config.json`; the host side does not write a second copy**.
@@ -153,12 +156,16 @@ The icon here is drawn on the fly by `plugin/make-icon.mjs` (32×32 magenta); no
 so the click lands on the dialog and the text does not go into the document body — **and of all the assertions in that run, only "the new version contains the marker typed this time" failed**:
 the save succeeded, the version moved forward, and the bytes really changed. If the check had been "saved successfully", that pass would have been all green while verifying nothing.
 
-### 6. Both origin checks — both are blocking
+### 5. Both origin checks — both are blocking; version 1 messages are ignored
 
 Declare trust only in another origin, then send a message from this page → ignored;
 control group (declare trust in this page's own origin) → accepted. Only the control group shows that the first result is not vacuously true.
 
-### 7. The four legal notice links really lead somewhere — they do now, and **the need for this was only discovered while building this PoC**
+Since 0.3.0 the same pass (⑤) also sends a version 1 `open` from a trusted origin: it is ignored, and the `ready` the page posts on
+load names only version 2. On the 0.2.0 build these three assertions were red (the page started fetching, and announced both
+versions); on 0.3.0 they are green.
+
+### 6. The four legal notice links really lead somewhere — they do now, and **the need for this was only discovered while building this PoC**
 
 ⚠ **In the plain static setup, the dumb server originally did not serve a single `/legal/*` path** — meaning
 all four links were 404, **while the page still opened without reporting a single error**.
@@ -180,9 +187,10 @@ Two things were added:
 **exists and is not covered**, and never opens the links. This repository really did break once because of this
 (the dev Vite config was missing the `/legal` proxy, all four links were 404, and every test was green).
 
-### 8. Disabling download and Save As (added 2026-09-17) — can be disabled, saving is unaffected
+### 7. Disabling download and Save As (added 2026-09-17) — can be disabled, saving is unaffected
 
-The open command gained a new field, `allowDownload` (not given = allowed, the same as before it was added). When set to `false`,
+The open command gained a new field, `allowDownload` (not given = allowed, the same as before it was added; with protocol version 2 it comes from
+`document.permissions.download` in the config token). When set to `false`,
 the component sets `download` to false in the permissions it gives the editor, and the File menu has no "Download as" and no Save As panel.
 
 ⚠ **The difficulty is that the component's own export also goes through `downloadAs`**, and when any of the four editors receives this command, the first thing it does is check the download permission,
@@ -210,29 +218,29 @@ Two other changes were made along the way, both found during this work:
   ⚠ **After the fix, browsers that opened the page before will keep downloading**: that tree is served with a one-year immutable cache, so the wrong response, together with its type, is already stored in the browser cache,
   and the browser no longer asks the server (measured: after the fix, the same browser profile still downloaded, and the request never reached the server; a fresh profile did not download). Clear the cache once in that browser.
 
-### 9. Protocol version 2 (added 2026-10-07) — works next to version 1, and a refused save loses nothing
+### 8. Protocol version 2 (added 2026-10-07; the only version since 0.3.0) — works, and a refused save loses nothing
 
-Version 2 (`onlyoffice-web-embed/2`) replaces "the host hands over URLs and headers" with "the host hands over one
+Version 2 (`onlyoffice-web-embed/2`) replaced "the host hands over URLs and headers" with "the host hands over one
 config token": an editor configuration signed the ONLYOFFICE Docs way. Fetching and saving go through an
 **integration backend** that is not part of this repository; its contract is [INTEGRATION.md](../INTEGRATION.md).
-The page posts one `ready` per protocol name and follows whichever protocol the first `open` uses.
+In 0.2.0 it ran next to version 1; 0.3.0 removed version 1.
 
 Two passes cover it, run against `server/fake-backend.mjs` with the mock playing the host:
 
 | Pass | What it asserts | Reading |
 |---|---|---|
-| ⑦ `v2-flow.mjs` | Plain version 1 fields in `open` (read-only, a fake URL, base version 999) are ignored: the document opens editable, at base version 1, and the fake URL is never requested; every fetch signature matches the URL the host saw (`use: "fetch"`, `exp`); real typing reaches the stored bytes; the callback is status 6 / forcesavetype 1 with base version 1; a version 1 `save` sent afterwards does nothing; a second save in the same session succeeds | 15/15 |
-| ⑧ `v2-conflict.mjs` | Two sessions open version 1; the first save wins; the second is refused with the host's 409, `from: "host"`, `unsavedKept: true`; the stored file is not overwritten; the second user (a no-download session) clicks "save my copy locally" and the downloaded file contains their typing | 10/10 |
+| ② `v2-flow.mjs` | The document opens editable at base version 1 (both from the token); every fetch signature matches the URL the host saw (`use: "fetch"`, `exp`); real typing reaches the stored bytes; the callback is status 6 / forcesavetype 1 with base version 1; a version 1 `save` sent afterwards does nothing; a second save in the same session succeeds | 14/14 |
+| ③ `v2-conflict.mjs` | Two sessions open version 1; the first save wins; the second is refused with the host's 409, `from: "host"`, `unsavedKept: true`; the stored file is not overwritten; the second user (a no-download session) clicks "save my copy locally" and the downloaded file contains their typing | 10/10 |
 
-Before the mock learned to play a version 2 host, ⑦ was red (3/15: nothing opened). Version 1's six passes stayed green
-throughout, at the root and under the `/oow` prefix.
+Before the mock learned to play a version 2 host, ② was red (nothing opened). In 0.2.0 the open message also carried wrong
+version 1 fields as noise, to show the page reads only the token; with version 1 gone from the page that check was dropped.
 
 ---
 
 ## Three things discovered while building this PoC
 
 **1. The host cannot reach anything inside the iframe, so the protocol must have a "save now" command.**
-The first version of the host was written like this: `iframe.contentWindow.__embed.save()`.
+The first draft of the host was written like this: `iframe.contentWindow.__embed.save()`.
 The embed page and the host are **almost certainly on different origins** (the embed page has to be same-origin with that large set of static assets, while the host is the business application);
 reading a property across origins gives `undefined`, and `undefined?.save?.()` is valid
 — so **clicking save does nothing and reports no error at all**.
@@ -253,8 +261,9 @@ So this one response header was added to the dumb server (**it is a header, not 
 ## Known limitations
 
 - **Simultaneous editing by several people is not supported.** If two people each save, the later save completely overwrites the earlier one.
-  The `baseVersion` field in the contract gives the backend a chance to say something before overwriting;
-  **it is a mitigation, not a fix**: the second person still loses their own work unless they export first.
+  The `document.baseVersion` field in the config token gives the host a chance to refuse before overwriting, and the refused copy
+  can be saved locally; **it is a mitigation, not a fix**: the second person still has to merge their work by hand.
 - **No autosave.** Saving is triggered by a person clicking a button.
-- The mock backend here is **only a stand-in**; its credential logic (invalidated after one use) exists so that the tests have something to check,
-  and is not behavior that any real backend should have.
+- The mock host and `server/fake-backend.mjs` are **only stand-ins** for the tests. The mock's `/_probe/*` routes (including
+  `GET /_probe/file`, which hands out the stored bytes without checking any signature) exist so that the tests have something to check,
+  and are not behavior that any real host should have.
