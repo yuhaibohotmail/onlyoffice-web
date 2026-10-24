@@ -1,30 +1,16 @@
 /**
  * **宿主页**——外层那一个，替将来真正嵌入编辑器的那个应用。
  *
- * 它做三件事：把接入页放进一个 iframe、告诉它去哪儿取件存件、
- * 以及**每次它要头的时候现给一份**。
+ * 它做三件事：把接入页放进一个 iframe、等它说「好了」之后向 mock 要一张**配置令牌**
+ * （mock 那边按 ONLYOFFICE Docs 的接入协议签），连同接入后端的地址一起递进去、
+ * 以及在人点保存时发一条 `save`。宿主不发取件存件地址、不给请求头：取件存件都经接入后端。
  *
- * ── 那个「故意写错」的开关是免费探针，别删 ──────────────────────────────
+ * 存件被拒、接入页说它还留着那一份时，页面上冒出「把我这一份存到本地」那个按钮。
  *
- * 页面上有一格「凭据怎么给」，两档：
- *
- *   每次现给（对的）   → 一路通
- *   开场给一份用到底   → **第二次请求当场被拒**
- *
- * 后一档不是摆设：没有它，「一路通」这个结果**可能只是因为 mock 那边从来不拦**
- * ——一个恒真的检查和一个正确的检查长得一模一样。切到那一档看见它真的红，
- * 才说明前一档的绿是有内容的。
- *
- * 真实世界里对应的坏法是「令牌到第 16 分钟过期」。它的症状是**存件那一下被拒**，
- * 而那时用户的成果只在 iframe 的内存里——所以这条不是理论问题。
+ * 第一版协议（宿主递地址、每次现给请求头）已于 0.3.0 删除，这一页只按第二版当宿主。
  */
 
-import {
-  PROTOCOL,
-  isProtocolMessage,
-  type EmbedFileType,
-  type HostMessage,
-} from "./protocol";
+import { PROTOCOL, isProtocolMessage, type HostMessage } from "./protocol";
 
 const 参数 = new URL(location.href).searchParams;
 /** 接入页在哪个源上。默认笨静态服务器那个口，可用查询串覆盖，方便换端口试。 */
@@ -45,7 +31,7 @@ const 体积上限 = 参数.has("officeXmlLimitBytes") ? Number(参数.get("offi
 const 无插件 = 参数.get("noPlugin") === "1";
 /**
  * 预览模式开关（验缩放钮是否可点）。
- * `?mode=view` 或 `?readOnly=1` → 只读；默认 edit。
+ * `?mode=view` 或 `?readOnly=1` → 请 mock 把令牌签成只读；默认 edit。
  * `?keepViewControls=0` 可关掉「保留视图缩放」对照。
  * `?zoom=-2` 默认适应宽度；也可传 -1 / 百分数。
  */
@@ -55,12 +41,16 @@ const 预览模式 =
   参数.get("readOnly") === "true";
 const 保留视图控件 = 参数.get("keepViewControls") !== "0";
 const 缩放参数 = 参数.has("zoom") ? Number(参数.get("zoom")) : 预览模式 ? -2 : undefined;
+/** 接入后端在哪。默认本机 3044（实测里那个假后端的端口）。 */
+const 接入后端 = 参数.get("backend") || "http://" + location.hostname + ":3044";
+/** `?download=0`：请 mock 在令牌里写「不许下载」。 */
+const 不许下载 = 参数.get("download") === "0";
 
 const 日志框 = document.getElementById("日志")!;
 const 状态框 = document.getElementById("状态")!;
 const iframe = document.getElementById("接入页") as HTMLIFrameElement;
-const 凭据档位 = document.getElementById("凭据档位") as HTMLSelectElement;
 const 保存钮 = document.getElementById("保存") as HTMLButtonElement;
+const 存到本地钮 = document.getElementById("存到本地") as HTMLButtonElement;
 
 const 插件状态框 = document.getElementById("插件状态")!;
 /**
@@ -86,41 +76,13 @@ function 说(s: string) {
   状态框.textContent = s;
 }
 
-// ── 凭据 ────────────────────────────────────────────────────────────────
-
-let 发过的凭据: string[] = [];
-let 开场那一份: string | null = null;
-
-/**
- * 现签一份凭据。
- *
- * 真实的宿主在这里会去换一张短寿命的令牌；这个 PoC 只要**每次的值都不一样**
- * 就够了——mock 那边判的正是这个。
- */
-function 现签一份(): string {
-  return "Bearer poc-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
-}
-
-function 给一份头(): Record<string, string> {
-  if (凭据档位.value === "开场一份") {
-    // 故意写错的那一档：第一次签，之后一直用那一份。
-    if (!开场那一份) 开场那一份 = 现签一份();
-    发过的凭据.push(开场那一份);
-    return { Authorization: 开场那一份 };
-  }
-  const t = 现签一份();
-  发过的凭据.push(t);
-  return { Authorization: t };
-}
-
 // ── 收接入页的消息 ──────────────────────────────────────────────────────
 
 const 收到的: Array<Record<string, unknown>> = [];
-/**
- * 「我这次编辑基于第几版」。存件成功后要往前走，否则同一次会话里的第二次保存
- * 必然撞冲突——那是「打开—改字—存回」走通一次之后才开始的静默失败。
- */
-let 基准版 = 1;
+/** 接入页打开之后报回来的那三格（全取自接入后端验过的令牌）。 */
+let 打开信息: Record<string, unknown> | null = null;
+/** 「我这次编辑基于第几版」。只用来显示：真正往前推它的是接入页（见 protocol.ts 的 `saved`）。 */
+let 基准版: number | null = null;
 let 就绪 = false;
 let 上次存件: { version: number | null; size: number } | null = null;
 let 上次失败: Record<string, unknown> | null = null;
@@ -158,57 +120,43 @@ window.addEventListener("message", (e) => {
 
   if (m.type === "ready") {
     就绪 = true;
-    记("接入页说它好了 → 先问一下现在第几版，再发 open");
+    记("接入页说它好了（认得 " + JSON.stringify(m.protocols) + "）→ 向 mock 要一张配置令牌");
     void 发open();
     return;
   }
-  if (m.type === "need-headers") {
-    const h = 给一份头();
-    记("它要头（第 " + m.requestId + " 次，为了 " + m.purpose + "）→ 给了一份");
-    发给接入页({
-      protocol: PROTOCOL,
-      type: "headers",
-      requestId: m.requestId as number,
-      headers: h,
-    });
+  if (m.type === "opened") {
+    打开信息 = m;
+    if (typeof m.baseVersion === "number") 基准版 = m.baseVersion;
+    记("打开了：mode=" + m.mode + "，allowDownload=" + m.allowDownload + "，基准版 " + m.baseVersion);
+    说("已打开（" + m.mode + (m.allowDownload ? "" : "，不许下载") + "）");
     return;
   }
-
   if (m.type === "saved") {
     上次存件 = { version: (m.version as number) ?? null, size: (m.size as number) ?? 0 };
-    // 存成功之后基准版要往前走，否则同一次会话里的第二次保存必然撞冲突。
     if (typeof m.version === "number") 基准版 = m.version;
+    存到本地钮.hidden = true;
     记("存回去了：第 " + String(m.version) + " 版，" + m.size + " 字节");
     说("已保存（第 " + String(m.version) + " 版）");
     保存钮.disabled = false;
     return;
   }
-
   if (m.type === "failed") {
     上次失败 = m;
-    记("出事了（" + m.stage + "）：" + String(m.message));
-    // ⚠ 存件失败要**阻断式**地讲清楚，不能一闪而过：
-    // 此刻用户的成果只在那个 iframe 里，唯一不丢数的动作是趁标签页还开着导出到本地。
+    记("出事了（" + m.stage + "，" + String(m.status ?? "") + "，来自 " + String(m.from ?? "接入页") + "）：" + String(m.message));
+    // ⚠ 存件失败要**阻断式**地讲清楚，不能一闪而过：此刻用户的成果只在那个 iframe 里。
+    // 接入页说它还留着那一份，才给「存到本地」。**不看 allowDownload**：那是这个人自己刚改的内容。
+    存到本地钮.hidden = m.unsavedKept !== true;
     说(
       m.stage === "save"
-        ? "⚠ 没存上（" + (m.status ?? "?") + "）。你的改动还在编辑器里 —— " +
-          "先导出到本地再说。原文：" + String(m.body ?? m.message).slice(0, 300)
+        ? "⚠ 没存上（" + (m.status ?? "?") + "）。" +
+            (m.unsavedKept ? "你的这一份还在编辑器里 —— 点「把我这一份存到本地」。" : "") +
+            "原文：" + String(m.body ?? m.message).slice(0, 300)
         : "出事了（" + m.stage + "）：" + String(m.message),
     );
     保存钮.disabled = false;
   }
 });
 
-/**
- * 问一下文档现在第几版，再让接入页打开它。
- *
- * ⚠ **必须等接入页说「我好了」再发，不能在 `iframe.onload` 里就发**：
- * onload 只说明那个 HTML 到了，里面的脚本还没挂上监听——
- * 那时发过去的消息**不会报错，只是没人收**，症状是「一直停在等配置」。
- *
- * ⚠ **基准版要现问，不能写死。** 写死成 1 的话，存过一次之后刷新页面再存
- * 必然撞 409——那是宿主自己造出来的假冲突，会被当成产品缺陷去查。
- */
 /**
  * 这个 PoC 自己那个插件的地址。
  *
@@ -236,16 +184,18 @@ async function 取插件guid(): Promise<string | null> {
   }
 }
 
+/**
+ * 向 mock 要一张配置令牌，连同接入后端的地址递进去。
+ *
+ * ⚠ **必须等接入页说「我好了」再发，不能在 `iframe.onload` 里就发**：
+ * onload 只说明那个 HTML 到了，里面的脚本还没挂上监听——
+ * 那时发过去的消息**不会报错，只是没人收**，症状是「一直停在等配置」。
+ *
+ * ⚠ 真实的宿主里**签令牌的是宿主的后端**，前端只是转递；基准版也是那边签进令牌的，
+ * 不由前端写死。这里 mock 收下前端说的插件配置、「许不许下载」和「预览还是编辑」再签，只是为了让实测能切换这几格。
+ */
 async function 发open() {
-  try {
-    const m = await (await fetch(location.origin + "/meta")).json();
-    if (typeof m?.version === "number") 基准版 = m.version;
-    记("现在是第 " + 基准版 + " 版");
-  } catch (e) {
-    记("问不到版本号（" + String(e) + "），按第 " + 基准版 + " 版发");
-  }
-
-  // ── 通道二：把插件下发给编辑器，并给它一格配置 ──────────────────────
+  // ── 通道二：把插件下发给编辑器，并给它一格配置（经令牌里的 editorConfig.plugins）──
   const guid = 无插件 ? null : await 取插件guid();
   const 插件配置 = guid
     ? {
@@ -257,13 +207,7 @@ async function 发open() {
          * 真实部署里这里放的是插件访问它自己后端要用的凭证。
          * 这里放几个能认出来的值，实测据此断言「宿主放进去的，插件真的收到了」。
          */
-        options: {
-          [guid]: {
-            来自: "宿主页",
-            记号: "options-" + Date.now(),
-            文档: "poc-种子.docx",
-          },
-        },
+        options: { [guid]: { 来自: "宿主页", 记号: "options-" + Date.now(), 文档: "poc-种子.docx" } },
       }
     : undefined;
   if (guid) {
@@ -273,19 +217,32 @@ async function 发open() {
     // 对照组那一档。**说清楚是「没下发」不是「坏了」**——两者一个要查、一个不用。
     说插件("这一趟刻意不下发（对照组）", "等");
   }
+  let token = "";
+  try {
+    const r = await fetch(location.origin + "/oo/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        plugins: 插件配置,
+        download: !不许下载,
+        ...(预览模式 ? { mode: "view" } : {}),
+      }),
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status + " " + (await r.text()).slice(0, 200));
+    token = (await r.json()).token;
+  } catch (e) {
+    记("要配置令牌失败（" + String(e) + "）");
+    说("要不到配置令牌：" + String(e));
+    return;
+  }
+  记("拿到配置令牌，递给接入页（接入后端在 " + 接入后端 + "）");
   发给接入页({
     protocol: PROTOCOL,
     type: "open",
-    fileName: "poc-种子.docx",
-    fileType: "DOCX" as EmbedFileType,
-    // 绝对地址：接入页在另一个源上，相对地址会解析到发静态资源那边去。
-    downloadUrl: location.origin + "/file",
-    saveUrl: location.origin + "/file",
-    baseVersion: 基准版,
-    lang: "zh",
+    token,
+    backendUrl: 接入后端,
     ...(预览模式
       ? {
-          mode: "view" as const,
           keepViewControls: 保留视图控件,
           suppressLeavePrompt: true,
           migrateFitPageZoom: true,
@@ -294,7 +251,6 @@ async function 发open() {
             : {}),
         }
       : {}),
-    ...(插件配置 ? { plugins: 插件配置 } : {}),
     // 实测那条「导出回落成原文件时必须拒绝上传」用它把闸门压到一个必然触发的值。
     // 平时不给，就是不设这道闸。
     ...(体积上限 !== null ? { officeXmlLimitBytes: 体积上限 } : {}),
@@ -314,7 +270,7 @@ async function 发open() {
 
 function 发给接入页(m: HostMessage) {
   // ⚠ targetOrigin 写死接入页那个源，**永远不要写 "*"**
-  // ——那是把凭据广播给此刻恰好占着那个 frame 的任何文档。
+  // ——那是把令牌广播给此刻恰好占着那个 frame 的任何文档。
   iframe.contentWindow?.postMessage(m, new URL(接入页地址).origin);
 }
 
@@ -329,30 +285,34 @@ function 发给接入页(m: HostMessage) {
   // 接入页与宿主几乎一定不同源（接入页要与那一大堆静态资源同源），
   // 跨源读 `iframe.contentWindow.__embed` 拿到的是 undefined，
   // 而 `undefined?.save?.()` 是合法的 —— 于是**点了什么都不发生，一个错都不报**。
-  // 第一版就是那么写的，这条注释是那次的产物。
+  // 最早的宿主就是那么写的，这条注释是那次的产物。
   发给接入页({ protocol: PROTOCOL, type: "save" });
+});
+
+存到本地钮.addEventListener("click", () => {
+  发给接入页({ protocol: PROTOCOL, type: "download-unsaved" });
+  记("请接入页把没存上的那一份存到本地");
 });
 
 /** 自动实测从这里驱动，走的路与人点按钮完全一样。 */
 (window as unknown as { __host: unknown }).__host = {
   ready: () => 就绪,
   save: () => 保存钮.click(),
+  /** 请接入页把没存上的那一份存到本地（与点那个按钮同一条路）。 */
+  downloadUnsaved: () => 存到本地钮.click(),
   state: () => ({
     就绪,
+    打开信息,
     基准版,
     插件报告,
     下发了插件: !无插件,
-    发过的凭据数: 发过的凭据.length,
-    互不相同的凭据数: new Set(发过的凭据).size,
-    凭据档位: 凭据档位.value,
     上次存件,
     上次失败,
     收到的: 收到的.map((m) => m.type),
+    存到本地钮可见: !存到本地钮.hidden,
   }),
-  setMode: (v: string) => {
-    凭据档位.value = v;
-    开场那一份 = null;
-  },
+  /** 原样发一条消息给接入页。只给实测用：验「第一版（已删）的消息接入页不理」。 */
+  sendRaw: (m: unknown) => 发给接入页(m as HostMessage),
 };
 
 记("接入页地址：" + 接入页地址);

@@ -1,5 +1,5 @@
 /**
- * 第 3 问：**导出回落成「打开时那份原文件」的时候，接入页真的会拒绝上传吗。**
+ * 第 4 问：**导出回落成「打开时那份原文件」的时候，接入页真的会拒绝上传吗。**
  *
  * ── 为什么这一条值得单独测 ──────────────────────────────────────────────
  *
@@ -23,14 +23,15 @@
  * 只有①的话，「我拒绝了」可能只是一句话而字节照样传了；
  * 只有②的话，没传上去可能是别的原因（比如它压根没走到那一步）。
  *
- * 跑法（两个服务器都要起着）：
- *   node embed-poc/probe/fallback-guard.mjs
+ * 跑法：由 run.mjs 起好静态服务器、mock 与接入后端之后调用。
+ *   node embed-poc/probe/fallback-guard.mjs <宿主> <静态> <接入后端>
  */
 
 import { chromium } from "playwright";
 
 const 宿主 = (process.argv[2] || "http://127.0.0.1:3043").replace(/\/+$/, "");
 const 静态 = (process.argv[3] || "http://127.0.0.1:3042").replace(/\/+$/, "");
+const 接入后端 = (process.argv[4] || "http://127.0.0.1:3044").replace(/\/+$/, "");
 
 const 条目 = [];
 function 断言(名, 真, 详 = "") {
@@ -50,7 +51,8 @@ const 浏览器 = await chromium.launch();
 const 页 = await 浏览器.newPage({ viewport: { width: 1440, height: 900 } });
 
 const 地址 =
-  宿主 + "/?embedOrigin=" + encodeURIComponent(静态) + "&officeXmlLimitBytes=1";
+  宿主 + "/?embedOrigin=" + encodeURIComponent(静态) + "&backend=" + encodeURIComponent(接入后端) +
+  "&officeXmlLimitBytes=1";
 console.log("打开宿主页（体积上限压到 1 字节）" + 地址);
 await 页.goto(地址, { waitUntil: "domcontentloaded", timeout: 60000 });
 
@@ -58,7 +60,7 @@ const 接入页 = 页.frameLocator("#接入页");
 /**
  * ⚠ **不要求编辑器 iframe 出现。**
  *
- * 第一版这么写过，结果整条断言红在「文档没打开」上，而那是**误解**：
+ * 最早这么写过，结果整条断言红在「文档没打开」上，而那是**误解**：
  * 那道体积闸是在**打开**的时候置上标记的（x2t 转换输入时超限），
  * 超限的文档本来就打不开或打不全。`exportAsBlob()` 之后看的是那个标记。
  *

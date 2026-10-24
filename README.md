@@ -77,11 +77,19 @@ npm run fixtures:formats
 
 ```sh
 npm run poc:build     # build its three pages
-npm run poc:e2e       # start the servers, run all seven passes, stop them (one pass is **expected to fail**)
+npm run poc:e2e       # start the servers, run all eight passes, stop them (one pass is **expected to fail**)
 ```
 
 It answers questions such as "does it still work behind a server that only serves files, like nginx" and
-"does the rule of requesting fresh credentials every time hold". Results are in [embed-poc/README.md](embed-poc/README.md).
+"is a stale save refused without losing the user's copy". Results are in [embed-poc/README.md](embed-poc/README.md).
+
+**Embed protocol version 2** (added in 0.2.0) lets the embed page be driven by a host that speaks a subset of
+the ONLYOFFICE Docs integration protocol: the host signs an editor configuration (a config token), and a small
+**integration backend** fetches `document.url` with a request signature and sends saves back to `callbackUrl` as a
+signed callback. **That backend is not part of this repository**: whoever embeds the page implements it, against
+the HTTP contract in [INTEGRATION.md](INTEGRATION.md). It does no conversion and no collaboration. Version 1 (the
+host handed over URLs and request headers, no backend) was removed in 0.3.0; the embed page speaks only version 2.
+The component itself (`src/`) still runs from plain static hosting without any backend.
 
 ## Build and release
 
@@ -89,6 +97,17 @@ It answers questions such as "does it still work behind a server that only serve
 npm run build      # front-end bundle → dist/ (~1.4 MB)
 npm run release    # assemble the full package → release/onlyoffice-web-<version>/ (includes vendor, ~1.5 GB, takes a few minutes)
 npm run release -- --no-vendor    # when the target machine already has vendor
+```
+
+⚠ **A release is only built from a clean tree sitting exactly on the tag `v<version>`** (added in 0.2.0).
+The "Get source code" link in the UI points at that tag, so a package built from anything else runs code the link
+does not lead to — and the link still opens. `make-release` refuses otherwise, before doing anything. A packaging
+script outside this repository that bundles `embed-poc/dist` should run the same check against the
+checkout it packages: `node scripts/release-guard.mjs --root <checkout>` (exit 0 = may release, 1 = refused).
+The order is therefore: bump `version` in `package.json`, commit, tag that commit `v<version>`, push the tag, then build.
+
+```sh
+npm run check:release     # the release guard's own tests (node:test, no infrastructure)
 ```
 
 ⚠ **`dist/` cannot run on its own**; it is only the front-end half. The full package also needs two things: **the back-end process**,
@@ -171,7 +190,8 @@ never at what the UI says.
 | `demo/server/` | Back end: routing + ticket signing and verification + storage and versioning |
 | `demo/plugin/` | Our own ONLYOFFICE plugin |
 | `demo/e2e/run.mjs` | Automated tests |
-| `embed-poc/` | **An example of embedding this component in someone else's page**: the host page holds the editor in an iframe, and the two sides talk only through `postMessage`. It is self-contained: it depends on no other code in this repository and ships its own servers. It is also a test suite (`npm run poc:e2e`, seven passes, one of them **expected to fail**). Results and pitfalls are in [embed-poc/README.md](embed-poc/README.md) |
+| `embed-poc/` | **An example of embedding this component in someone else's page**: the host page holds the editor in an iframe, and the two sides talk only through `postMessage`. It is self-contained: it depends on no other code in this repository and ships its own servers. It is also a test suite (`npm run poc:e2e`, eight passes, one of them **expected to fail**). Results and pitfalls are in [embed-poc/README.md](embed-poc/README.md) |
+| `INTEGRATION.md` | **The contract of embed protocol version 2**: the `postMessage` messages, and the HTTP endpoints an integration backend must provide (that backend is implemented outside this repository) |
 | `NOTICE.md` | Modification notice (required by the license) |
 | `LICENSE` | Full AGPL-3.0 text + Ascensio's five additional terms |
 | `poc/backend-x2t/` | ⚠ **Abandoned, left in place for now.** An experiment with a middle path, running a wasm conversion engine on the back end as well; we decided against it (reasons in `BACKEND.md`). ⚠ The lines in its scripts that read `fixtures/lesson-plan-zh.docx` **no longer point to anything**: the fixtures moved into `demo/` on 2026-08-30 and the abandoned code was not updated. The code itself is fine; only the path is out of date |
@@ -333,5 +353,6 @@ so running into one again costs far more time than reading this list once.
 
 - **No collaboration, and overwrites happen without an error.** The mock server lives in a single tab, and there is no way in for a second person.
   If two people open the same document and each saves, the later save completely overwrites the earlier one, and both see success.
+  (Through the embed page, a host can prevent this with `baseVersion`: it refuses the later save, and the person keeps a local copy.)
 - **No autosave.** Saving is triggered by clicking a button. If the browser crashes or the tab is closed, all changes are lost.
 - **`Ctrl+S` is intercepted** (the component deliberately disables the editor's built-in save); pressing it does nothing and reports nothing.

@@ -1,8 +1,12 @@
 /**
  * 一条命令跑完这个 PoC 的全部实测。
  *
- * 它起两个服务器、按顺序跑七趟、然后收摊。七趟里有一趟是**对照组**
+ * 它起三个服务器（静态、mock、假的接入后端）、按顺序跑八趟、然后收摊。八趟里有一趟是**对照组**
  * （故意用盘上原样那份登记表），它**期望红**——那一趟绿了才是出事了。
+ *
+ * 接入页只讲第二版协议（配置令牌 + 接入后端；第一版已于 0.3.0 删除），所以要开编辑器的那几趟
+ * 都要接入后端。接入后端不在这个仓库里（由使用方照 `INTEGRATION.md` 自己实现），这里起的是
+ * `server/fake-backend.mjs`，一个只给实测用的假后端。
  *
  * 退出码：0 全过；1 有趟没过；2 = 一趟都没跑起来。
  *
@@ -10,6 +14,7 @@
  */
 
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +23,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const POC = path.resolve(HERE, "..");
 const 静态口 = Number(process.env.OOW_STATIC_PORT || 3042);
 const mock口 = Number(process.env.OOW_MOCK_PORT || 3043);
+const 后端口 = Number(process.env.OOW_BACKEND_PORT || 3044);
+/** mock（当宿主）与假后端共用的密钥。每次现生成，只活在这一趟里。 */
+const 共用密钥 = "poc-" + crypto.randomBytes(24).toString("hex");
 /**
  * 整套东西挂在哪个路径前缀下。**默认空 = 挂在根上**，与从前逐字一样。
  *
@@ -41,6 +49,7 @@ const 挂载前缀 = (() => {
 })();
 const 静态 = "http://127.0.0.1:" + 静态口 + 挂载前缀;
 const 宿主 = "http://127.0.0.1:" + mock口;
+const 接入后端 = "http://127.0.0.1:" + 后端口;
 
 const 进程们 = [];
 function 起(名, 脚本, 参数, 环境) {
@@ -114,33 +123,42 @@ try {
   } else {
     // ── 1 · 正常那一档 ──────────────────────────────────────────────────
     起("静态", "static-server.mjs", [String(静态口)]);
-    起("mock", "mock-host.mjs", [String(mock口)]);
+    起("mock", "mock-host.mjs", [String(mock口)], { OOW_JWT_SECRET: 共用密钥 });
+    起("假后端", "fake-backend.mjs", [String(后端口)], {
+      OOW_JWT_SECRET: 共用密钥,
+      // 宿主（mock）来取暂存文件走的地址。本机跑就是它自己。
+      OOW_HOST_FETCH_BASE: 接入后端,
+      // 这里接入页与假后端不同源（两个端口），所以要放行接入页那个源。部署时同源，用不着。
+      OOW_ALLOWED_ORIGINS: new URL(静态).origin,
+    });
     const 静态好了 = await 等它起来(静态 + "/embed.html");
     const mock好了 = await 等它起来(宿主 + "/_probe/state");
-    if (!静态好了 || !mock好了) {
-      console.error("服务器没起来（静态=" + 静态好了 + " mock=" + mock好了 + "）");
+    const 后端好了 = await 等它起来(接入后端 + "/api/health");
+    if (!静态好了 || !mock好了 || !后端好了) {
+      console.error("服务器没起来（静态=" + 静态好了 + " mock=" + mock好了 + " 假后端=" + 后端好了 + "）");
       process.exitCode = 2;
     } else {
       await 一趟("① 笨静态服务器后面正常吗（用预生成的登记表）", "static-check.mjs", [静态]);
-      await 一趟("② 接入页那条链 + 凭据每次现要", "embed-flow.mjs", [宿主, 静态]);
-      await 一趟("③ 导出回落时拒绝上传", "fallback-guard.mjs", [宿主, 静态]);
-      await 一趟("④ 两道来源校验", "origin-guard.mjs", [静态]);
-      await 一趟("⑤ 自定义插件那条通道（宿主下发配置，插件收得到）", "plugin-channel.mjs", [宿主, 静态]);
-      await 一趟("⑥ 法律声明那四条链接真的能到东西", "legal-links.mjs", [静态, 宿主]);
+      await 一趟("② 配置令牌 → 接入后端取件 → 敲字 → 存件回调", "v2-flow.mjs", [宿主, 静态, 接入后端]);
+      await 一趟("③ 两人先后存，后存的被拒 409、不覆盖、能存到本地", "v2-conflict.mjs", [宿主, 静态, 接入后端]);
+      await 一趟("④ 导出回落时拒绝上传", "fallback-guard.mjs", [宿主, 静态, 接入后端]);
+      await 一趟("⑤ 两道来源校验；第一版（已删）的消息不理", "origin-guard.mjs", [静态]);
+      await 一趟("⑥ 自定义插件那条通道（宿主下发配置，插件收得到）", "plugin-channel.mjs", [宿主, 静态, 接入后端]);
+      await 一趟("⑦ 法律声明那四条链接真的能到东西", "legal-links.mjs", [静态, 宿主, 接入后端]);
 
       // ── 2 · 对照组：换成盘上原样那份登记表，**期望它红** ────────────────
       停全部();
       起("静态·原样", "static-server.mjs", [String(静态口)], { OOW_NO_PREGEN: "1" });
       if (await 等它起来(静态 + "/embed.html")) {
         await 一趟(
-          "⑦ 对照组：不预生成登记表 → **期望红**（证明①那一趟的绿是有内容的）",
+          "⑧ 对照组：不预生成登记表 → **期望红**（证明①那一趟的绿是有内容的）",
           "static-check.mjs",
           [静态],
           1,
         );
       } else {
         console.error("对照组那趟的服务器没起来");
-        结果.push({ 名: "⑦ 对照组", 码: -1, 期望: 1, 过: false });
+        结果.push({ 名: "⑧ 对照组", 码: -1, 期望: 1, 过: false });
       }
     }
   }
