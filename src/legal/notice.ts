@@ -243,13 +243,17 @@ export function mountLegalNotice(
   if (existing) return () => existing.remove();
 
   // 样子可以调，**但不许调到不显眼**——附加条款第三条要的是「清晰可达、显著可见」。
-  // 所以这里只动了圆角、描边与投影，位置、字号与那行字都没动。
+  // 所以这里只动了圆角、描边与投影，字号与那行字都没动。
+  //
+  // 【本项目修改 2026-11-08】位置从右下角挪到右上角的标题行里（文件名与头像之间那段空白）。
+  // 原来压在右下角，正好盖住状态栏上的缩放、适合页宽这些按钮（文字、表格、演示三种编辑器都是）。
+  // 标题行是编辑器最上面一行，照样一眼看得到。
   const badge = el(
     "button",
     {
       position: "absolute",
-      right: "10px",
-      bottom: "10px",
+      right: "56px",
+      top: "7px",
       zIndex: "2147483645",
       padding: "4px 11px",
       border: "1px solid rgba(16,22,26,.14)",

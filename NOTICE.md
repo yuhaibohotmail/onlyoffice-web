@@ -65,6 +65,7 @@ Non-code content (illustrations, icon sets, documentation) is licensed under **C
 | What was changed | Why |
 |---|---|
 | **The warm-up frame is hidden with an inline style** | Upstream hid this iframe only with the Tailwind class names `w-0 h-0 hidden absolute -z-10`, which work only when the host page happens to load Tailwind. The embed page has no Tailwind, so the frame was shown at the browser's default 300×150 size inside the page's flex layout and pushed the editor up, leaving a blank strip below it (measured: 154 pixels). It is now hidden with an inline `display: none` (the class names are kept). A hidden iframe still loads its page, so the warm-up is unaffected. |
+| **The "ONLYOFFICE · 修改版 · 许可" entry moved to the top right** | The entry used to sit in the editor's bottom-right corner, right on top of the status-bar buttons for zoom and fit-to-width (in the document, spreadsheet and presentation editors alike). It now sits at the right end of the topmost title row, in the empty space between the file name and the avatar. It is just as easy to see, its font size and wording are unchanged, and it no longer covers any button. |
 
 ## 3. Where the corresponding source code is
 
