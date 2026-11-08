@@ -29,6 +29,18 @@ const 体积上限 = 参数.has("officeXmlLimitBytes") ? Number(参数.get("offi
  * 而那条断言就成了恒真。
  */
 const 无插件 = 参数.get("noPlugin") === "1";
+/**
+ * 预览模式开关（验缩放钮是否可点）。
+ * `?mode=view` 或 `?readOnly=1` → 请 mock 把令牌签成只读；默认 edit。
+ * `?keepViewControls=0` 可关掉「保留视图缩放」对照。
+ * `?zoom=-2` 默认适应宽度；也可传 -1 / 百分数。
+ */
+const 预览模式 =
+  参数.get("mode") === "view" ||
+  参数.get("readOnly") === "1" ||
+  参数.get("readOnly") === "true";
+const 保留视图控件 = 参数.get("keepViewControls") !== "0";
+const 缩放参数 = 参数.has("zoom") ? Number(参数.get("zoom")) : 预览模式 ? -2 : undefined;
 /** 接入后端在哪。默认本机 3044（实测里那个假后端的端口）。 */
 const 接入后端 = 参数.get("backend") || "http://" + location.hostname + ":3044";
 /** `?download=0`：请 mock 在令牌里写「不许下载」。 */
@@ -180,7 +192,7 @@ async function 取插件guid(): Promise<string | null> {
  * 那时发过去的消息**不会报错，只是没人收**，症状是「一直停在等配置」。
  *
  * ⚠ 真实的宿主里**签令牌的是宿主的后端**，前端只是转递；基准版也是那边签进令牌的，
- * 不由前端写死。这里 mock 收下前端说的插件配置与「许不许下载」再签，只是为了让实测能切换这两格。
+ * 不由前端写死。这里 mock 收下前端说的插件配置、「许不许下载」和「预览还是编辑」再签，只是为了让实测能切换这几格。
  */
 async function 发open() {
   // ── 通道二：把插件下发给编辑器，并给它一格配置（经令牌里的 editorConfig.plugins）──
@@ -210,7 +222,11 @@ async function 发open() {
     const r = await fetch(location.origin + "/oo/config", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ plugins: 插件配置, download: !不许下载 }),
+      body: JSON.stringify({
+        plugins: 插件配置,
+        download: !不许下载,
+        ...(预览模式 ? { mode: "view" } : {}),
+      }),
     });
     if (!r.ok) throw new Error("HTTP " + r.status + " " + (await r.text()).slice(0, 200));
     token = (await r.json()).token;
@@ -225,11 +241,31 @@ async function 发open() {
     type: "open",
     token,
     backendUrl: 接入后端,
+    ...(预览模式
+      ? {
+          keepViewControls: 保留视图控件,
+          suppressLeavePrompt: true,
+          migrateFitPageZoom: true,
+          ...(缩放参数 !== undefined && Number.isFinite(缩放参数)
+            ? { zoom: 缩放参数 }
+            : {}),
+        }
+      : {}),
     // 实测那条「导出回落成原文件时必须拒绝上传」用它把闸门压到一个必然触发的值。
     // 平时不给，就是不设这道闸。
     ...(体积上限 !== null ? { officeXmlLimitBytes: 体积上限 } : {}),
   });
-  说("已发 open，等它打开…");
+  说(
+    预览模式
+      ? `已发 open（预览 mode=view, keepViewControls=${保留视图控件}）…`
+      : "已发 open，等它打开…",
+  );
+  if (预览模式) {
+    记(
+      `预览参数 mode=view keepViewControls=${保留视图控件}` +
+        (缩放参数 !== undefined ? ` zoom=${缩放参数}` : ""),
+    );
+  }
 }
 
 function 发给接入页(m: HostMessage) {

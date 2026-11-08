@@ -72,6 +72,26 @@ import {
   showOfficeXmlSizeLimitOverlay,
 } from "../internal/ui/office-xml-size-limit-overlay";
 
+/** 文档交互模式：view=只读预览，edit=可编辑。 */
+export type OnlyOfficeDocumentMode = "view" | "edit";
+
+/**
+ * 从 mode / readOnly 解析是否为只读预览。
+ * 同时出现时以 mode 为准；都不传则视为可编辑。
+ */
+export function resolveIsViewMode(options: {
+  mode?: OnlyOfficeDocumentMode;
+  readOnly?: boolean;
+}): boolean {
+  if (options.mode === "view") {
+    return true;
+  }
+  if (options.mode === "edit") {
+    return false;
+  }
+  return !!options.readOnly;
+}
+
 export type CreateEditorViewOptions = {
   isNew: boolean;
   fileName: string;
@@ -79,6 +99,12 @@ export type CreateEditorViewOptions = {
   url?: string;
   loader?: (url: string) => Promise<ArrayBuffer>;
   fileType?: string;
+  /**
+   * 首选开关：view=只读预览，edit=可编辑。
+   * 与 readOnly 同时出现时以本字段为准。
+   */
+  mode?: OnlyOfficeDocumentMode;
+  /** 兼容旧字段；等价于 mode:"view"。与 mode 同时出现时以 mode 为准。 */
   readOnly?: boolean;
   user?: User;
   lang?: string;
@@ -97,6 +123,26 @@ export type CreateEditorViewOptions = {
   variant?: OnlyOfficeEditorVariant;
   /** 【本项目新增 2026-09-17】界面上给不给下载 / 另存，默认给。见 grantDownloadForExport */
   allowDownload?: boolean;
+  /**
+   * OnlyOffice customization.zoom。
+   * -2=适应宽度，-1=适合页面，或 50–500 百分比。默认 -2。
+   */
+  zoom?: number;
+  /**
+   * localStorage 里若是「适合页面」(-1)，是否迁成当前 zoom。
+   * 仅当 zoom===-2 时默认 true；其它 zoom 默认 false。
+   */
+  migrateFitPageZoom?: boolean;
+  /**
+   * view 模式下是否抑制 iframe「离开此网站？」提示。默认 true。
+   */
+  suppressLeavePrompt?: boolean;
+  /**
+   * view 模式下是否保留缩放/翻页等视图控件（不盖 toolbar-mask）。
+   * 默认 true，对 Word / Excel / PPT / PDF 一律生效。
+   * 编辑拦截仍靠 asc_setRestriction(VIEW)。
+   */
+  keepViewControls?: boolean;
 };
 
 /**
@@ -219,11 +265,41 @@ type OnlyOfficeWindow = OnlyOfficeIframeWindow & {
 
 type ShellMainController = {
   mode?: { isEdit?: boolean; canEdit?: boolean };
+  appOptions?: { isEdit?: boolean; canEdit?: boolean };
+  permissions?: { edit?: boolean };
+  editorConfig?: { mode?: string };
+  api?: {
+    asc_setViewMode?: (view: boolean) => void;
+    asc_enableKeyEvents?: (enabled: boolean) => void;
+  };
+  disableEditing?: (disable: boolean) => void;
 };
 
 type WordHeaderView = {
   btnDocMode?: { setVisible?: (visible: boolean) => void };
   btnPDFMode?: { setVisible?: (visible: boolean) => void };
+};
+
+type ZoomControlLike = {
+  setDisabled?: (disabled: boolean) => void;
+  isDisabled?: () => boolean;
+  keepState?: unknown[];
+  disabled?: boolean;
+};
+
+type ViewTabControllerLike = {
+  SetDisabled?: (state: boolean) => void;
+  getView?: () => ViewTabViewLike | undefined;
+  view?: ViewTabViewLike;
+};
+
+type ViewTabViewLike = {
+  lockedControls?: ZoomControlLike[];
+  btnsFitToPage?: ZoomControlLike[] | { setDisabled?: (v: boolean) => void };
+  btnsFitToWidth?: ZoomControlLike[] | { setDisabled?: (v: boolean) => void };
+  btnZoom100?: ZoomControlLike;
+  btnMultiplePages?: ZoomControlLike;
+  cmbsZoom?: ZoomControlLike[];
 };
 
 export class EditorManager {
@@ -245,6 +321,18 @@ export class EditorManager {
   private variant: OnlyOfficeEditorVariant = "editor";
   /** 【本项目新增 2026-09-17】见 grantDownloadForExport */
   private allowDownload = true;
+  /** customization.zoom；默认适应宽度 */
+  private zoom = -2;
+  private migrateFitPageZoom = true;
+  private suppressLeavePrompt = true;
+  private keepViewControls = true;
+  private viewControlsObserver: MutationObserver | null = null;
+  private viewControlsTimer: number | null = null;
+  private viewControlsWatchdogStopTimer: number | null = null;
+  /** 防止 MutationObserver ↔ DOM 解锁互相触发把 iframe 主线程打满 */
+  private viewControlsEnsuring = false;
+  private viewControlsUnlocked = false;
+  private viewControlsObsTimer: number | null = null;
   /** 与容器一一对应，供事件与 Connector 使用同一稳定路由键。 */
   private instanceId: string;
   private containerId: string;
@@ -579,11 +667,46 @@ export class EditorManager {
     };
   }
 
+  /**
+   * 预览默认「适应宽度」。OnlyOffice 会把用户选过的缩放写进 localStorage，
+   * 并覆盖 customization.zoom；若以前卡在「适合页面」(-1)，百分比下拉几乎用不了。
+   * 开启 migrateFitPageZoom 时，把 -1 迁成当前 zoom（通常 -2）。
+   * 编辑器在 iframe 内读自己的 localStorage，父页与 iframe 都迁一次。
+   */
+  private preferFitWidthZoomPreference(storage?: Storage | null) {
+    if (!this.migrateFitPageZoom) {
+      return;
+    }
+    const target = String(this.zoom);
+    const keys = [
+      "de-settings-zoom",
+      "pdfe-settings-zoom",
+      "pe-settings-zoom",
+      "sse-settings-zoom",
+    ];
+    const targets = [storage, window.localStorage].filter(
+      (item): item is Storage => !!item,
+    );
+    for (const store of targets) {
+      try {
+        for (const key of keys) {
+          if (store.getItem(key) === "-1") {
+            store.setItem(key, target);
+          }
+        }
+      } catch {
+        // ignore quota / private mode
+      }
+    }
+  }
+
   /** 关闭 autosave 与保存按钮；保存快捷键由 installSaveShortcutBlocker 拦截。 */
   private buildEditorCustomization() {
     return {
       uiTheme: this.uiTheme,
       autosave: false,
+      // -2 = 适应宽度；-1 = 适合页面（预览框偏矮时会被缩得很小，缩放下拉也不好用）
+      zoom: this.zoom,
       layout: {
         header: {
           save: false,
@@ -1102,6 +1225,7 @@ export class EditorManager {
 
   private getShellMainController() {
     const win = this.getEditorFrameWindow() as OnlyOfficeIframeWindow & {
+      SSE?: { getController?: (name: string) => ShellMainController };
       PE?: { getController?: (name: string) => ShellMainController };
       DE?: { getController?: (name: string) => ShellMainController };
       getApplication?: () => {
@@ -1110,6 +1234,7 @@ export class EditorManager {
     };
 
     return (
+      win?.SSE?.getController?.("Main") ??
       win?.PE?.getController?.("Main") ??
       win?.getApplication?.()?.getController?.("Main") ??
       win?.DE?.getController?.("Main")
@@ -1163,23 +1288,31 @@ export class EditorManager {
       return;
     }
 
+    // DisableToolbar(true) 会盖 .toolbar-mask，缩放/翻页一起置灰。
+    // keepViewControls 时不盖 mask，编辑拦截靠 asc_setRestriction(VIEW)。
+    const maskToolbar = disabled ? !this.keepViewControls : true;
+    const disableStatusBar = disabled && this.keepViewControls ? false : true;
+
     if (documentType === DocumentType.Slide) {
       nc.trigger("editing:disable", disabled, {
         viewMode: disabled,
         allowSignature: !disabled,
         rightMenu: { clear: false, disable: true },
-        statusBar: true,
+        statusBar: disableStatusBar,
         leftMenu: { disable: disabled, previewMode: disabled },
         fileMenu: false,
         comments: { disable: false, previewMode: disabled },
         chat: false,
         review: true,
-        viewport: disabled,
+        viewport: disabled && !this.keepViewControls,
         documentHolder: { clear: disabled, disable: true },
-        toolbar: true,
+        toolbar: maskToolbar,
         header: { search: false },
         shortcuts: disabled ? false : undefined,
       });
+      if (disabled && this.keepViewControls) {
+        this.ensureViewControlsUsable();
+      }
       return;
     }
 
@@ -1194,20 +1327,27 @@ export class EditorManager {
           allowSignature: false,
           allowProtect: false,
           rightMenu: { clear: true, disable: true },
-          statusBar: true,
+          statusBar: disableStatusBar,
           leftMenu: { disable: true, previewMode: true },
           fileMenu: { protect: true, history: false },
-          navigation: { disable: false, previewMode: true },
+          navigation: {
+            disable: false,
+            previewMode: !this.keepViewControls,
+          },
           comments: { disable: false, previewMode: true },
           chat: false,
           review: true,
-          viewport: true,
+          // viewport:true 会连带影响视图区；保留缩放时不要锁
+          viewport: !this.keepViewControls,
           documentHolder: { clear: true, disable: true },
-          toolbar: true,
+          toolbar: maskToolbar,
           protect: true,
           header: { search: false, startfill: false },
           shortcuts: false,
         });
+        if (this.keepViewControls) {
+          this.ensureViewControlsUsable();
+        }
       } else {
         nc.trigger("editing:disable", false, {
           viewMode: false,
@@ -1236,6 +1376,7 @@ export class EditorManager {
       return;
     }
 
+    // PDF / Excel 等：只读且 keepViewControls 时不盖 mask、不锁状态栏缩放。
     nc.trigger("editing:disable", disabled, {
       viewMode: disabled,
       reviewMode: false,
@@ -1245,17 +1386,476 @@ export class EditorManager {
       allowSignature: false,
       allowProtect: false,
       rightMenu: { clear: false, disable: true },
-      statusBar: true,
+      statusBar: disableStatusBar,
       leftMenu: { disable: false, previewMode: disabled },
       fileMenu: false,
-      navigation: { disable: false, previewMode: disabled },
+      navigation: {
+        disable: false,
+        previewMode: disabled && !this.keepViewControls,
+      },
       comments: { disable: false, previewMode: disabled },
       chat: false,
       review: true,
       viewport: false,
       documentHolder: { clear: false, disable: true },
-      toolbar: true,
+      toolbar: maskToolbar,
     });
+    if (disabled && this.keepViewControls) {
+      this.ensureViewControlsUsable();
+    }
+  }
+
+  private stopViewControlsWatchdog() {
+    if (this.viewControlsTimer !== null) {
+      window.clearInterval(this.viewControlsTimer);
+      this.viewControlsTimer = null;
+    }
+    if (this.viewControlsWatchdogStopTimer !== null) {
+      window.clearTimeout(this.viewControlsWatchdogStopTimer);
+      this.viewControlsWatchdogStopTimer = null;
+    }
+    if (this.viewControlsObsTimer !== null) {
+      window.clearTimeout(this.viewControlsObsTimer);
+      this.viewControlsObsTimer = null;
+    }
+    if (this.viewControlsObserver) {
+      this.viewControlsObserver.disconnect();
+      this.viewControlsObserver = null;
+    }
+    this.viewControlsEnsuring = false;
+    this.viewControlsUnlocked = false;
+  }
+
+  /**
+   * OnlyOffice 会在 restriction / 工具栏延迟渲染后再次给缩放钮加 disabled。
+   * 前 15s 较快轮询 + 防抖 MutationObserver；稳定解锁后降频，避免 DOM 反馈环卡死 iframe。
+   */
+  private startViewControlsWatchdog() {
+    this.stopViewControlsWatchdog();
+    if (!this.keepViewControls || !this.readOnly) {
+      return;
+    }
+
+    const tick = () => {
+      if (!this.readOnly || !this.keepViewControls) {
+        this.stopViewControlsWatchdog();
+        return;
+      }
+      this.ensureViewControlsUsable();
+    };
+
+    tick();
+    this.viewControlsTimer = window.setInterval(tick, 800);
+    this.viewControlsWatchdogStopTimer = window.setTimeout(() => {
+      if (this.viewControlsTimer !== null) {
+        window.clearInterval(this.viewControlsTimer);
+        this.viewControlsTimer = null;
+      }
+      // 稳定后慢轮询，防 OO 后期又加锁
+      this.viewControlsTimer = window.setInterval(tick, 3000);
+    }, 15000);
+
+    try {
+      const win = this.getEditorFrameWindow();
+      const toolbar = win?.document?.querySelector(".toolbar");
+      if (toolbar && typeof MutationObserver !== "undefined") {
+        this.viewControlsObserver = new MutationObserver(() => {
+          if (this.viewControlsEnsuring) {
+            return;
+          }
+          if (this.viewControlsObsTimer !== null) {
+            window.clearTimeout(this.viewControlsObsTimer);
+          }
+          this.viewControlsObsTimer = window.setTimeout(() => {
+            this.viewControlsObsTimer = null;
+            tick();
+          }, 250);
+        });
+        this.viewControlsObserver.observe(toolbar, {
+          attributes: true,
+          childList: true,
+          subtree: true,
+          attributeFilter: ["class", "disabled", "aria-disabled"],
+        });
+      }
+    } catch {
+      // ignore
+    }
+
+    this.installEditingDisableGuard();
+  }
+
+  /**
+   * 拦截 iframe 内 editing:disable：keepViewControls 时强制不盖 toolbar-mask、不锁 statusBar。
+   * Main.disableEditing / onDocModeApply 仍会自行 trigger，只靠事后清不够。
+   */
+  private installEditingDisableGuard() {
+    if (!this.keepViewControls || !this.readOnly) {
+      return;
+    }
+    const win = this.getEditorFrameWindow() as
+      | (OnlyOfficeIframeWindow & {
+          Common?: {
+            NotificationCenter?: {
+              trigger?: (...args: unknown[]) => unknown;
+              __oowKeepViewPatched?: boolean;
+            };
+          };
+        })
+      | undefined;
+    const nc = win?.Common?.NotificationCenter;
+    if (!nc?.trigger || nc.__oowKeepViewPatched) {
+      return;
+    }
+    const original = nc.trigger.bind(nc);
+    nc.trigger = (...args: unknown[]) => {
+      if (args[0] === "editing:disable" && this.keepViewControls && this.readOnly) {
+        const disable = args[1];
+        const options = (args[2] || {}) as Record<string, unknown>;
+        if (disable) {
+          args[2] = {
+            ...options,
+            toolbar: false,
+            statusBar: false,
+            viewport: false,
+          };
+        }
+      }
+      const ret = original(...args);
+      if (args[0] === "editing:disable" && this.keepViewControls && this.readOnly) {
+        window.setTimeout(() => this.ensureViewControlsUsable(), 0);
+      }
+      return ret;
+    };
+    nc.__oowKeepViewPatched = true;
+  }
+
+  /**
+   * 去掉 toolbar-mask，并用 Common.Utils.lockControls 清 View 缩放锁。
+   * injectButtons 初始 disabled:true + keepState；直接 setDisabled 会被 keepState 立刻锁回。
+   */
+  private ensureViewControlsUsable() {
+    if (!this.keepViewControls || this.viewControlsEnsuring) {
+      return;
+    }
+
+    const win = this.getEditorFrameWindow() as
+      | (OnlyOfficeIframeWindow & {
+          Common?: {
+            Utils?: {
+              lockControls?: (
+                causes: unknown,
+                lock: boolean,
+                opts?: { array?: unknown[]; clear?: unknown[] },
+              ) => void;
+            };
+            enumLock?: Record<string, unknown>;
+          };
+          DE?: { getController?: (name: string) => ViewTabControllerLike };
+          PDFE?: { getController?: (name: string) => ViewTabControllerLike };
+          PE?: { getController?: (name: string) => ViewTabControllerLike };
+          SSE?: { getController?: (name: string) => ViewTabControllerLike };
+          getApplication?: () => {
+            getController?: (name: string) => ViewTabControllerLike;
+          };
+        })
+      | undefined;
+    if (!win) {
+      return;
+    }
+
+    // 已解锁且无 mask 时跳过 DOM 写入，打断 MutationObserver 反馈环
+    try {
+      const root = win.document;
+      const fw =
+        root?.querySelector(".slot-btn-ftw .btn") ||
+        root?.querySelector('[id*="tlbtn-btn-ftw"]');
+      const hasMask = !!root?.querySelector(
+        ".toolbar-mask, .toolbar-group-mask",
+      );
+      const fwOk =
+        !!fw &&
+        !fw.classList.contains("disabled") &&
+        !fw.hasAttribute("disabled");
+      if (
+        this.viewControlsUnlocked &&
+        fwOk &&
+        !hasMask &&
+        !!root?.getElementById("oow-keep-view-controls-css")
+      ) {
+        return;
+      }
+    } catch {
+      // ignore and continue full unlock
+    }
+
+    this.viewControlsEnsuring = true;
+    // 暂停观察，避免我们自己的 class/disabled 改动再次入队
+    try {
+      this.viewControlsObserver?.disconnect();
+    } catch {
+      // ignore
+    }
+
+    try {
+      try {
+        win.document
+          ?.querySelectorAll(".toolbar-mask, .toolbar-group-mask")
+          .forEach((el) => el.remove());
+        win.document
+          ?.querySelectorAll(".toolbar.masked")
+          .forEach((el) => el.classList.remove("masked"));
+      } catch {
+        // ignore
+      }
+
+      const enableBtn = (btn: ZoomControlLike | null | undefined) => {
+        if (!btn || typeof btn.setDisabled !== "function") {
+          return;
+        }
+        try {
+          if (Array.isArray(btn.keepState)) {
+            btn.keepState.length = 0;
+          }
+          // 绕过 setDisabled 内部 this.disabled != disabled 短路
+          if (btn.isDisabled?.()) {
+            btn.setDisabled(false);
+          } else {
+            (btn as { disabled?: boolean }).disabled = true;
+            btn.setDisabled(false);
+          }
+        } catch {
+          // ignore
+        }
+      };
+
+      const enableMany = (items: unknown) => {
+        if (!items) {
+          return;
+        }
+        if (Array.isArray(items)) {
+          items.forEach((item) => enableBtn(item as ZoomControlLike));
+          return;
+        }
+        const set = items as {
+          setDisabled?: (v: boolean) => void;
+          each?: (fn: (b: ZoomControlLike) => void) => void;
+          forEach?: (fn: (b: ZoomControlLike) => void) => void;
+        };
+        if (typeof set.each === "function") {
+          set.each((b) => enableBtn(b));
+        } else if (typeof set.forEach === "function") {
+          set.forEach((b) => enableBtn(b));
+        } else if (typeof set.setDisabled === "function") {
+          enableBtn(set as ZoomControlLike);
+        }
+      };
+
+      try {
+        const viewTab =
+          win.DE?.getController?.("ViewTab") ??
+          win.PDFE?.getController?.("ViewTab") ??
+          win.PE?.getController?.("ViewTab") ??
+          win.SSE?.getController?.("ViewTab") ??
+          win.getApplication?.()?.getController?.("ViewTab");
+
+        viewTab?.SetDisabled?.(false);
+        const view = viewTab?.view ?? viewTab?.getView?.();
+        const locked = view?.lockedControls;
+        const enumLock = win.Common?.enumLock;
+        const lockControls = win.Common?.Utils?.lockControls;
+        if (lockControls && enumLock && Array.isArray(locked) && locked.length) {
+          const causes = [
+            enumLock.disableOnStart,
+            enumLock.lostConnect,
+            enumLock.viewMode,
+            enumLock.previewReviewMode,
+            enumLock.viewFormMode,
+            enumLock.docLockView,
+          ].filter((c) => c !== undefined);
+          if (causes.length) {
+            lockControls(causes, false, { array: locked });
+          }
+        }
+        enableMany(view?.btnsFitToPage);
+        enableMany(view?.btnsFitToWidth);
+        enableBtn(view?.btnZoom100);
+        enableBtn(view?.btnMultiplePages);
+        enableMany(view?.cmbsZoom);
+        enableMany(locked);
+      } catch {
+        // ignore
+      }
+
+      // DOM 兜底：去掉 disabled 样式，避免 keepState 残留导致仍灰
+      const root = win.document;
+      if (root) {
+        if (!root.getElementById("oow-keep-view-controls-css")) {
+          const style = root.createElement("style");
+          style.id = "oow-keep-view-controls-css";
+          style.textContent = `
+.slot-btn-ftp .btn, .slot-btn-ftw .btn, #slot-btn-zoom-100 .btn, #slot-btn-multiple-pages .btn,
+.slot-field-zoom .form-control, .slot-field-zoom input, .slot-field-zoom .btn,
+[id*="tlbtn-btn-ftp"], [id*="tlbtn-btn-ftw"],
+.slot-btn-ftp .btn.disabled, .slot-btn-ftw .btn.disabled, #slot-btn-zoom-100 .btn.disabled,
+#slot-btn-multiple-pages .btn.disabled,
+.slot-field-zoom .form-control.disabled, .slot-field-zoom input:disabled {
+  opacity: 1 !important;
+  filter: none !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  color: inherit !important;
+  background-color: inherit !important;
+}
+.slot-btn-ftp .btn[disabled], .slot-btn-ftw .btn[disabled], #slot-btn-zoom-100 .btn[disabled],
+#slot-btn-multiple-pages .btn[disabled],
+[id*="tlbtn-btn-ftp"][disabled], [id*="tlbtn-btn-ftw"][disabled] {
+  pointer-events: auto !important;
+}
+`;
+          root.head?.appendChild(style);
+        }
+        const slots = root.querySelectorAll(
+          ".slot-btn-ftp button, .slot-btn-ftw button, #slot-btn-zoom-100 button, #slot-btn-multiple-pages button, [id*='tlbtn-btn-ftp'] button, [id*='tlbtn-btn-ftw'] button, [id*='tlbtn-btn-ftp'], [id*='tlbtn-btn-ftw'], #slot-btn-zoom-100 .btn, #slot-btn-multiple-pages .btn, .slot-field-zoom input, .slot-field-zoom .form-control, .slot-field-zoom button",
+        );
+        slots.forEach((el) => {
+          el.classList.remove("disabled");
+          el.removeAttribute("disabled");
+          if (el instanceof HTMLElement) {
+            el.style.pointerEvents = "auto";
+            el.style.opacity = "1";
+          }
+        });
+
+        const fw =
+          root.querySelector(".slot-btn-ftw .btn") ||
+          root.querySelector('[id*="tlbtn-btn-ftw"]');
+        const unlocked =
+          !!fw &&
+          !fw.classList.contains("disabled") &&
+          !fw.hasAttribute("disabled") &&
+          !root.querySelector(".toolbar-mask, .toolbar-group-mask");
+        this.viewControlsUnlocked = unlocked;
+
+        // 探针 / 排障：只在状态变化时打一次
+        try {
+          const ftp =
+            root.querySelector(".slot-btn-ftp .btn") ||
+            root.querySelector('[id*="tlbtn-btn-ftp"]');
+          const zoom = root.querySelector(
+            ".slot-field-zoom input, .slot-field-zoom .form-control",
+          );
+          const report = {
+            hasMask: !!root.querySelector(".toolbar-mask, .toolbar-group-mask"),
+            hasCss: !!root.getElementById("oow-keep-view-controls-css"),
+            fitWidthDisabled: fw
+              ? fw.classList.contains("disabled") || fw.hasAttribute("disabled")
+              : null,
+            fitPageDisabled: ftp
+              ? ftp.classList.contains("disabled") || ftp.hasAttribute("disabled")
+              : null,
+            zoomDisabled: zoom
+              ? zoom.classList.contains("disabled") ||
+                zoom.hasAttribute("disabled")
+              : null,
+            fitWidthPresent: !!fw,
+          };
+          const key = JSON.stringify(report);
+          const g = win as { __oowViewZoomLast?: string };
+          if (g.__oowViewZoomLast !== key) {
+            g.__oowViewZoomLast = key;
+            console.info("[oow-view-zoom]", key);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    } finally {
+      this.viewControlsEnsuring = false;
+      // 重新挂上观察（若 watchdog 仍在）
+      try {
+        if (
+          this.viewControlsObserver &&
+          this.keepViewControls &&
+          this.readOnly
+        ) {
+          const toolbar = win.document?.querySelector(".toolbar");
+          if (toolbar) {
+            this.viewControlsObserver.observe(toolbar, {
+              attributes: true,
+              childList: true,
+              subtree: true,
+              attributeFilter: ["class", "disabled", "aria-disabled"],
+            });
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  /** 按配置强制套用缩放；localStorage 常在 DocEditor 创建后才可读，必须在 documentReady 再调一次。 */
+  private applyConfiguredZoom() {
+    const api = this.getSdkApi() as
+      | {
+          zoomFitToWidth?: () => void;
+          zoomFitToPage?: () => void;
+          zoom?: (percent: number) => void;
+        }
+      | undefined;
+    if (!api) {
+      return;
+    }
+
+    try {
+      if (this.zoom === -2 && api.zoomFitToWidth) {
+        api.zoomFitToWidth();
+      } else if (this.zoom === -1 && api.zoomFitToPage) {
+        api.zoomFitToPage();
+      } else if (this.zoom > 0 && api.zoom) {
+        api.zoom(this.zoom);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * 预览只读时去掉 iframe 的「离开此网站？」提示。
+   * PDF 以 edit 权限挂载后再锁 VIEW 时，web-apps 仍挂 onBeforeUnload，
+   * 缩放/限制会把文档标成已修改，切资源就会弹对话框。
+   */
+  private suppressLeavePromptForPreview() {
+    if (!this.readOnly || !this.suppressLeavePrompt) {
+      return;
+    }
+
+    const win = this.getEditorFrameWindow() as
+      | (OnlyOfficeIframeWindow & {
+          Common?: { localStorage?: { save?: () => void } };
+        })
+      | undefined;
+    if (!win) {
+      return;
+    }
+
+    win.onbeforeunload = () => {
+      try {
+        win.Common?.localStorage?.save?.();
+      } catch {
+        // ignore
+      }
+    };
+
+    try {
+      const api = this.getSdkApi() as
+        | { SetDocumentModified?: (v: boolean) => void }
+        | undefined;
+      api?.SetDocumentModified?.(false);
+    } catch {
+      // ignore
+    }
   }
 
   /** PPT 在通用只读逻辑之上追加：锁定 Main 控制器 + 禁用幻灯片侧栏。 */
@@ -1276,6 +1876,62 @@ export class EditorManager {
     if (main?.mode) {
       main.mode.isEdit = true;
       main.mode.canEdit = true;
+    }
+    if (main?.appOptions) {
+      main.appOptions.isEdit = true;
+      main.appOptions.canEdit = true;
+    }
+    if (main?.permissions) {
+      main.permissions.edit = true;
+    }
+    if (main?.editorConfig) {
+      main.editorConfig.mode = "edit";
+    }
+    try {
+      main?.disableEditing?.(false);
+    } catch {
+      // 解锁失败时仍继续清工具栏/单元格锁
+    }
+    main?.api?.asc_setViewMode?.(false);
+    main?.api?.asc_enableKeyEvents?.(true);
+
+    const win = this.getEditorFrameWindow() as OnlyOfficeIframeWindow & {
+      SSE?: { getController?: (name: string) => {
+        setMode?: (mode: unknown) => void;
+        setPreviewMode?: (mode: boolean) => void;
+        SetDisabled?: (disabled: boolean) => void;
+        DisableToolbar?: (disable: boolean, viewMode: boolean) => void;
+      } };
+      DE?: { getController?: (name: string) => {
+        setMode?: (mode: unknown) => void;
+        setPreviewMode?: (mode: boolean) => void;
+        SetDisabled?: (disabled: boolean) => void;
+        DisableToolbar?: (disable: boolean, viewMode: boolean) => void;
+      } };
+      PE?: { getController?: (name: string) => {
+        setMode?: (mode: unknown) => void;
+        setPreviewMode?: (mode: boolean) => void;
+        SetDisabled?: (disabled: boolean) => void;
+        DisableToolbar?: (disable: boolean, viewMode: boolean) => void;
+      } };
+    };
+    const app = win?.SSE ?? win?.DE ?? win?.PE;
+    try {
+      const cellEditor = app?.getController?.("CellEditor");
+      cellEditor?.setMode?.(main?.appOptions);
+      cellEditor?.setPreviewMode?.(false);
+    } catch {
+      // ignore
+    }
+    try {
+      app?.getController?.("DocumentHolder")?.SetDisabled?.(false);
+    } catch {
+      // ignore
+    }
+    try {
+      app?.getController?.("Toolbar")?.DisableToolbar?.(false, false);
+    } catch {
+      // ignore
     }
 
     this.getRestrictionSdkApi()?.asc_setCanSendChanges?.(true);
@@ -1455,6 +2111,7 @@ export class EditorManager {
   }
 
   private destroyDocEditorInstance() {
+    this.stopViewControlsWatchdog();
     this.disconnectConnector();
     this.editor?.destroyEditor?.();
     this.editor = null;
@@ -1540,12 +2197,18 @@ export class EditorManager {
 
     this.installSlideStructureEditBlocker();
     this.syncEditingRights(false);
+    this.suppressLeavePromptForPreview();
+    this.applyConfiguredZoom();
+    this.ensureViewControlsUsable();
 
     if (documentType === DocumentType.Slide) {
       // 工具栏 delayed render 后再锁一次，确保「新增幻灯片」按钮被 DisableToolbar 处理。
       window.setTimeout(() => {
         if (this.readOnly) {
           this.syncShellEditingDisable(true, documentType);
+          this.suppressLeavePromptForPreview();
+          this.ensureViewControlsUsable();
+          this.applyConfiguredZoom();
         }
       }, 0);
     }
@@ -1553,6 +2216,18 @@ export class EditorManager {
     if (documentType === DocumentType.Cell) {
       this.getSdkApi()?.asc_Recalculate?.();
     }
+
+    // 工具栏延迟渲染后可能再次挂上 beforeunload / mask；再清一次并强制适应宽度。
+    window.setTimeout(() => {
+      this.suppressLeavePromptForPreview();
+      this.ensureViewControlsUsable();
+      this.applyConfiguredZoom();
+    }, 0);
+    window.setTimeout(() => {
+      this.suppressLeavePromptForPreview();
+      this.ensureViewControlsUsable();
+      this.applyConfiguredZoom();
+    }, 400);
   }
 
   /** 语言写在 iframe URL 的 lang 参数里，运行时 refreshFile 不会更新界面语言。 */
@@ -1605,6 +2280,8 @@ export class EditorManager {
       buildVersion: window.DocsAPI!.DocEditor.version(),
     });
 
+    this.preferFitWidthZoomPreference();
+
     this.editor = new window.DocsAPI!.DocEditor(this.containerId, {
       document: {
         fileType: doc.fileType,
@@ -1618,6 +2295,11 @@ export class EditorManager {
       documentType,
       editorConfig: {
         lang: this.editorLang,
+        // PDF 预览直接用 view：不挂「文档已修改」离开提示，也不进批注可编辑态。
+        // Word/表格仍保持 edit 挂载后再锁，避免打开时样式异常。
+        ...(this.readOnly && documentType === DocumentType.Pdf
+          ? { mode: "view" as const }
+          : {}),
         coEditing: {
           mode: "fast",
           change: false,
@@ -1633,6 +2315,9 @@ export class EditorManager {
         onAppReady: () => {
           // 尽早安装代理，供 WebSocket auth 与后续 downloadAs 使用。
           this.installIframeProxies();
+          this.preferFitWidthZoomPreference(
+            this.getEditorFrameWindow()?.localStorage,
+          );
         },
         onDocumentReady: () => {
           this.installSaveShortcutBlocker();
@@ -1648,8 +2333,13 @@ export class EditorManager {
 
           if (this.readOnly) {
             this.applyInitialReadOnlyState(documentType);
-          } else if (documentType === DocumentType.Word) {
-            this.scheduleWordDocModeHide();
+          } else {
+            this.restoreShellEditMode();
+            this.syncShellEditingDisable(false, documentType);
+            if (documentType === DocumentType.Word) {
+              this.scheduleWordDocModeHide();
+            }
+            this.applyConfiguredZoom();
           }
         },
         onDocumentStateChange: (event: { data: boolean }) => {
@@ -1728,16 +2418,34 @@ export class EditorManager {
         sdk.asc_removeRestriction?.(ASC_RESTRICTION_VIEW);
         sdk.asc_setRestriction(ASC_RESTRICTION_NONE);
         this.restoreShellEditMode();
+        this.stopViewControlsWatchdog();
+        this.syncShellEditingDisable(false, documentType);
       } else {
         sdk.asc_setRestriction(ASC_RESTRICTION_VIEW);
         this.syncSlideReadOnlyExtras(true);
+        // keepViewControls：不要走 editing:disable。
+        // 即便 toolbar:false，viewMode/leftMenu 等仍会让 View 缩放钮反复变灰。
+        // 编辑拦截只靠 VIEW restriction；PPT 另有结构拦截。
+        if (this.keepViewControls && documentType !== DocumentType.Slide) {
+          if (documentType === DocumentType.Word) {
+            this.scheduleWordDocModeHide();
+          }
+          this.ensureViewControlsUsable();
+          this.startViewControlsWatchdog();
+        } else {
+          this.syncShellEditingDisable(true, documentType);
+          if (this.keepViewControls) {
+            this.ensureViewControlsUsable();
+            this.startViewControlsWatchdog();
+          }
+        }
       }
-      this.syncShellEditingDisable(!editing, documentType);
       return;
     }
 
     if (editing) {
       this.restoreShellEditMode();
+      this.stopViewControlsWatchdog();
       this.syncShellEditingDisable(false, documentType);
       this.editor.refreshFile?.(this.buildRefreshFileConfig(true));
     } else {
@@ -1745,7 +2453,19 @@ export class EditorManager {
       if (documentType !== DocumentType.Slide) {
         this.editor.denyEditingRights?.("");
       }
-      this.syncShellEditingDisable(true, documentType);
+      if (this.keepViewControls && documentType !== DocumentType.Slide) {
+        if (documentType === DocumentType.Word) {
+          this.scheduleWordDocModeHide();
+        }
+        this.ensureViewControlsUsable();
+        this.startViewControlsWatchdog();
+      } else {
+        this.syncShellEditingDisable(true, documentType);
+        if (this.keepViewControls) {
+          this.ensureViewControlsUsable();
+          this.startViewControlsWatchdog();
+        }
+      }
     }
   }
 
@@ -1821,7 +2541,7 @@ export class EditorManager {
     }
 
     this.destroy();
-    this.readOnly = !!options.readOnly;
+    this.readOnly = resolveIsViewMode(options);
     this.revisionReviewMode = !!options.revisionReview;
     this.server.setOfficeXmlEventConfig(options.officeXmlEvent);
     if (options.user) {
@@ -1876,6 +2596,11 @@ export class EditorManager {
     this.pluginsConfig = options.plugins;   // 【本 PoC 新增】
     this.variant = options.variant ?? "editor";   // 【本项目新增 2026-08-30】
     this.allowDownload = options.allowDownload ?? true;   // 【本项目新增 2026-09-17】
+    this.zoom = typeof options.zoom === "number" ? options.zoom : -2;
+    this.migrateFitPageZoom =
+      options.migrateFitPageZoom ?? this.zoom === -2;
+    this.suppressLeavePrompt = options.suppressLeavePrompt ?? true;
+    this.keepViewControls = options.keepViewControls ?? true;
 
     this.syncEditorBridge();
     this.mountDocEditor();
@@ -1915,6 +2640,12 @@ export class EditorManager {
 
   /** 就地切换只读；切到只读前先 downloadAs 落盘，避免后续导出仍是打开时的 Editor.bin。 */
   async setReadOnly(readOnly: boolean) {
+    return this.setMode(readOnly ? "view" : "edit");
+  }
+
+  /** 简单切换：view=只读预览，edit=可编辑。 */
+  async setMode(mode: OnlyOfficeDocumentMode) {
+    const readOnly = mode === "view";
     if (this.readOnly === readOnly) {
       return;
     }
@@ -1937,11 +2668,18 @@ export class EditorManager {
 
       this.installSlideStructureEditBlocker();
       this.syncEditingRights(!readOnly);
+      if (readOnly) {
+        this.suppressLeavePromptForPreview();
+      }
     } finally {
       onlyofficeEventbus.emit(ONLYOFFICE_EVENT_KEYS.LOADING_CHANGE, {
         loading: false,
       });
     }
+  }
+
+  getMode(): OnlyOfficeDocumentMode {
+    return this.readOnly ? "view" : "edit";
   }
 
   getReadOnly() {
@@ -2785,6 +3523,7 @@ export class EditorManager {
   }
 
   destroy() {
+    this.stopViewControlsWatchdog();
     this.rejectPendingRename(new Error("OnlyOffice editor was destroyed"));
     if (this.userSaveTimer !== null) {
       window.clearTimeout(this.userSaveTimer);

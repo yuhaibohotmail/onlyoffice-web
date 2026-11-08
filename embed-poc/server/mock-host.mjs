@@ -196,8 +196,8 @@ const server = http.createServer(async (req, res) => {
   const p = decodeURIComponent(url.pathname);
 
   // ── 签配置令牌 ──
-  // ⚠ 真实宿主里签令牌的是宿主自己的后端，前端只是转递；这里收下前端说的插件配置与
-  // 「许不许下载」再签，只是为了让实测能切换这两格。
+  // ⚠ 真实宿主里签令牌的是宿主自己的后端，前端只是转递；这里收下前端说的插件配置、
+  // 「许不许下载」和「预览还是编辑」再签，只是为了让实测能切换这几格。
   if (p === "/oo/config" && req.method === "POST") {
     if (!密钥) return json(res, 500, { error: "这个 mock 没配 OOW_JWT_SECRET，签不了令牌" });
     const 块 = [];
@@ -208,19 +208,20 @@ const server = http.createServer(async (req, res) => {
     const key = "poc-" + 文档.版本 + "-" + Math.random().toString(36).slice(2, 10);
     发过的key.add(key);
     const t = Math.floor(Date.now() / 1000);
+    const 只读 = 要.mode === "view";
     const token = sign({
       document: {
         fileType: "docx",
         key,
         title: 文档.文件名,
         url: 本源 + "/oo/file",
-        permissions: { edit: true, download: 要.download !== false },
+        permissions: { edit: !只读, download: 要.download !== false },
         baseVersion: 文档.版本,
       },
       documentType: "word",
       editorConfig: {
         callbackUrl: 本源 + "/oo/callback",
-        mode: "edit",
+        mode: 只读 ? "view" : "edit",
         lang: "zh-CN",
         user: { id: "poc-user", name: "实测" },
         ...(要.plugins ? { plugins: 要.plugins } : {}),
@@ -228,7 +229,7 @@ const server = http.createServer(async (req, res) => {
       iat: t,
       exp: t + 1200,
     }, 密钥);
-    记("签配置令牌", { key, 基准版: 文档.版本, 许下载: 要.download !== false });
+    记("签配置令牌", { key, 基准版: 文档.版本, 许下载: 要.download !== false, 模式: 只读 ? "view" : "edit" });
     return json(res, 200, { token });
   }
 
