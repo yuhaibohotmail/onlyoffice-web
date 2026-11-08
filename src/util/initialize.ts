@@ -50,6 +50,13 @@ function preloadEditorFrame(documentType?: DocumentType) {
   iframe.src = getOnlyOfficePreloadUrl(documentType);
   iframe.dataset.onlyofficePreload = page;
   iframe.className = "w-0 h-0 hidden absolute -z-10";
+  // 【本项目修改 2026-11-08】藏起来靠行内样式，不靠上面那几个类名。
+  // 那几个是 Tailwind 的类名，只在页面恰好加载了 Tailwind 时才有效；嵌入页（embed-poc）没有 Tailwind，
+  // 这个 iframe 就按浏览器默认的 300×150 显示出来，插进 body 的弹性布局里，把编辑器往上挤（实测多出 154 像素空白）。
+  // 类名保留，以免有人按它选中这个元素。display:none 的 iframe 照样加载页面，预热不受影响。
+  iframe.style.display = "none";
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.tabIndex = -1;
   document.body.appendChild(iframe);
 }
 

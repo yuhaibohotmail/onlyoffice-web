@@ -60,6 +60,12 @@ Non-code content (illustrations, icon sets, documentation) is licensed under **C
 | **Missing libheif imports no longer abort conversion** | The released `x2t.js` leaves libheif as `abort("missing function")` stubs. Old PowerPoint files probe those stubs while reading WMF or DIB pictures, the stub aborts, and the editor shows an unknown error. The worker rewrites the stubs before the script runs: the picture is skipped and the rest of the file still opens. |
 | **`x2t.wasm` skips a null image callback** | The same files then reach one `call_indirect` in function 62523 whose function pointer is null. The conversion finishes in Node; Chrome traps with `null function` and the editor shows an unknown error. `scripts/patch-x2t-null-callback.mjs` rewrites that call so a null pointer is skipped and a real callback still runs. `npm run x2t` applies it after the release checksum matches. The wasm binary is not stored in git; the patch script is the corresponding source for this change. |
 
+### 2026-11-08
+
+| What was changed | Why |
+|---|---|
+| **The warm-up frame is hidden with an inline style** | Upstream hid this iframe only with the Tailwind class names `w-0 h-0 hidden absolute -z-10`, which work only when the host page happens to load Tailwind. The embed page has no Tailwind, so the frame was shown at the browser's default 300×150 size inside the page's flex layout and pushed the editor up, leaving a blank strip below it (measured: 154 pixels). It is now hidden with an inline `display: none` (the class names are kept). A hidden iframe still loads its page, so the warm-up is unaffected. |
+
 ## 3. Where the corresponding source code is
 
 **The complete source code of this project is at <https://github.com/yuhaibohotmail/onlyoffice-web>**,

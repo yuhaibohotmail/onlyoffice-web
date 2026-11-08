@@ -60,6 +60,12 @@ ONLYOFFICE 按 GNU Affero 通用公共许可证第 3 版发布，并附有 Ascen
 | **缺了的 libheif 导入不再把转换直接中止** | 发布的 `x2t.js` 把 libheif 留成 `abort("missing function")` 桩。旧版 ppt 读 wmf、dib 图片时会碰到这些桩，一调用就把转换中止，编辑器只显示「未知错误」。Worker 在执行脚本前把桩改掉：这一张图跳过，文件其余部分照常打开。 |
 | **`x2t.wasm` 遇到空的图片回调就跳过** | 同一类文件接着会走到函数 62523 里一次函数指针为空的 `call_indirect`。这次转换在 Node 里能走完；Chrome 会陷阱成 `null function`，编辑器同样只显示「未知错误」。`scripts/patch-x2t-null-callback.mjs` 把这一处改成指针为空就跳过，有效回调仍然执行。`npm run x2t` 在发布件校验和通过之后打上它。wasm 本体不进 git，这个脚本就是这一处修改的对应源码。 |
 
+### 2026-11-08
+
+| 改了什么 | 为什么 |
+|---|---|
+| **预热 iframe 改用行内样式藏起来** | 上游只靠 Tailwind 的类名 `w-0 h-0 hidden absolute -z-10` 把这个 iframe 藏起来，只有宿主页面恰好加载了 Tailwind 才有效。嵌入页没有 Tailwind，这个 iframe 就按浏览器默认的 300×150 显示在页面的弹性布局里，把编辑器往上挤，编辑器下面留出一截空白（实测 154 像素）。现在用行内的 `display: none` 藏起来（类名保留）。藏起来的 iframe 照样加载页面，预热不受影响。 |
+
 ## 三、对应源码在哪
 
 **本项目的完整源码在 <https://github.com/yuhaibohotmail/onlyoffice-web>**，
