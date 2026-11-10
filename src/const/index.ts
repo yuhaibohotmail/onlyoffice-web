@@ -261,9 +261,11 @@ function buildStaticResource(): StaticResource {
     x2t: {
       root: x2tRoot,
       // 查询参数用来避开浏览器按启发式缓存住的旧 x2t.js。旧文件里的 heif 桩会 abort，编辑器只显示「未知错误」。
-      script: `${x2tRoot}/x2t.js?v=20261023`,
+      // 本项目修改（2026-11-10）：转换引擎换成 CryptPad v9.3.2+4，两个参数一起换。
+      // x2t.js 与 x2t.wasm 必须是同一份构建，只换掉一个会对不上；发 x2t 的地址又是长期缓存的，所以每换一次引擎都要改这里。
+      script: `${x2tRoot}/x2t.js?v=20261110`,
       // 同一查询参数让浏览器重新拉取 wasm。旧 wasm 在部分图片回调为空时会直接中断转换。
-      wasm: `${x2tRoot}/x2t.wasm?v=20261023d`,
+      wasm: `${x2tRoot}/x2t.wasm?v=20261110`,
       pdfFonts: {
         root: x2tPdfFontsRoot,
         default: `${x2tPdfFontsRoot}/${X2T_PDF_DEFAULT_FONT_FILE}`,

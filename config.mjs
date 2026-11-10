@@ -53,18 +53,20 @@ export const VENDOR_DIR = "vendor/onlyoffice";
  * 与 CryptPad 仓库里的 `pre-js.js` 逐字一致，且导出了只有 CryptPad 的包装代码
  * 才会产生的入口符号 `_main1`。所以「没有对应源码」这个说法不成立。
  *
- * 眼下先用 CryptPad 发布的现成产物（校验和已核）。等本机有了 docker，
+ * 眼下先用 CryptPad 发布的现成产物（校验和已核）。从 v9.3.2 起 CryptPad 的配方改从
+ * Euro-Office 的 core 编（Euro-Office 是从 ONLYOFFICE 分出去的一支，同样是 AGPL），
+ * 换上它之后 odp 打得开了（v9.3.0+0 打不开）；见 NOTICE 与 FINDINGS 第十一节。等本机有了 docker，
  * `build/x2t/` 那份配方会编出对齐 coreVersion 的自建产物顶掉它。
  */
 export const X2T = {
   source: "cryptpad-release",
-  version: "v9.3.0+0",
-  url: "https://github.com/cryptpad/onlyoffice-x2t-wasm/releases/download/v9.3.0%2B0/x2t.zip",
+  version: "v9.3.2+4",
+  url: "https://github.com/cryptpad/onlyoffice-x2t-wasm/releases/download/v9.3.2%2B4/x2t.zip",
   /** 官方随发布件一起给的 sha512，取回来必须对上。 */
   sha512:
-    "e82fbf21fcdcff2cbaca5b9a49c3a3d6bc5f5f02ba9b704a7384ceb91e17e979bf7659aaf59f677edf319fde91dd847b419e018f58f38eb1df6ab433a6cd207c",
+    "8fa965d86ef81c8615f2cc7c67eb0da270f88c573d137dcf82bb5b54d7ffacd66adb0e29f16b46a537279fc1c9ddf13ebc2b6e2f491c08cc4f266e6669763af6",
   /** 这份产物基于的 core 版本。⚠ 与 coreVersion 差一档，自建之后这里要跟着改。 */
-  builtFromCore: "9.3.0.140",
+  builtFromCore: "Euro-Office 9.3.2",
   repo: "https://github.com/cryptpad/onlyoffice-x2t-wasm",
 };
 
@@ -84,7 +86,7 @@ export const SDK_VERSION = DOCUMENT_SERVER.coreVersion;
  * 转换引擎与它的字体在盘上的位置。
  *
  * ⚠ **刻意不放进版本目录里面。** 它们与静态资源是两条各自独立的版本线：
- * 今天引擎是 9.3.0.140 而静态资源是 9.4.0.129。混在一个目录里，
+ * 今天引擎是 Euro-Office 9.3.2 而静态资源是 ONLYOFFICE 9.4.0.129。混在一个目录里，
  * 这个差别就看不见了；分开放，`SOURCE.json` 各记各的，差在哪一眼能看出来。
  * 后端伺服时把它们贴到 `/packages/onlyoffice/<版本>/x2t{,-fonts}/` 这两个位置上，
  * 因为组件是按那个地址找的。

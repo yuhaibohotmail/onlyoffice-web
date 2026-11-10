@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 /**
- * 给 CryptPad v9.3.0+0 的 x2t.wasm 补上空图片回调。
+ * 给 CryptPad 的 x2t.wasm 补上空图片回调（认得 v9.3.0+0 与 v9.3.2+4 两份构建）。
  *
  *   node scripts/patch-x2t-null-callback.mjs
  *   node scripts/patch-x2t-null-callback.mjs vendor/x2t/x2t.wasm
  *
- * 旧版 ppt 转到某一张图时，函数 62523 会 call_indirect 一个空的函数指针。
+ * 旧版 ppt 转到某一张图时，一个序列化函数会 call_indirect 一个空的函数指针
+ * （v9.3.0+0 里是函数 62523，v9.3.2+4 里是函数 86409）。
  * Node 里这次转换能走完，Chrome 会在这里陷阱成 RuntimeError: null function，
  * 编辑器只显示「未知错误」。
  *
- * 这一处把那个 call_indirect 换成：指针是 0 就丢掉两个参数，否则照原样调用。
- * 有效回调仍然执行。字节位置只对解开后 35985703 字节的那一份成立；
+ * 这一处把那个 call_indirect 换成：指针是 0 就不调（丢掉参数），否则照原样调用。
+ * 有效回调仍然执行。按解开后的长度认是哪一份构建，每一份都核对周围的字节；
  * 对不上就停，不去改别的构建。已经补过的文件原样返回。
+ * v9.3.2+4 开了函数指针强转的模拟，间接调用的样子不同，补法见下面 V932 那一段。
  *
  * wasm 本体不进 git。`scripts/fetch-x2t.mjs` 在校验和通过之后调用这里。
  */
@@ -73,16 +75,103 @@ function same(buf, at, bytes) {
   return buf.subarray(at, at + bytes.length).equals(bytes);
 }
 
+// ── CryptPad v9.3.2+4（Euro-Office 9.3.2）──────────────────────────────────
+//
+// 同一个函数（一个序列化函数：写两个字符串，再对一组 68 字节的对象逐个调虚函数表第 7 格）
+// 在这一版是第 86236 个函数体（算上 173 个导入是 86409）。这一版开了函数指针强转的模拟，
+// 间接调用一律走同一个签名：16 个 i64 参数、返回值丢掉。所以旧版那几个字节在这里不存在，
+// 要换一种补法：先把要调的函数指针取出来存进一个新加的局部变量，**不是 0 才压参数、才调**。
+const V932 = {
+  upstreamLen: 38383474,
+  patchedLen: 38383483,
+  sizeAt: 23540830, // 函数体长度（uleb，2 字节）的位置
+  oldBodyLen: 215,
+  newBodyLen: 224,
+};
+// 原来：（上一步算出元素地址）local.tee 3, i64.extend_i32_u, local.get 1, i64.extend_i32_u, i64.const 0 ×14,
+//       local.get 3, i32.load, i32.load offset=28, call_indirect 类型 0, drop
+const V932_OLD = Buffer.from(
+  "2203ad2001ad" + "4200".repeat(14) + "2003280200" + "28021c" + "110000" + "1a",
+  "hex",
+);
+// 改成：local.set 3, local.get 3, i32.load, i32.load offset=28, local.tee 5,
+//       if（无参无返回）
+//         local.get 3, i64.extend_i32_u, local.get 1, i64.extend_i32_u, i64.const 0 ×14,
+//         local.get 5, call_indirect 类型 0, drop
+//       end
+const V932_NEW = Buffer.from(
+  "2103" + "2003280200" + "28021c" + "2205" + "0440" +
+    "2003ad2001ad" + "4200".repeat(14) + "2005" + "110000" + "1a" +
+    "0b",
+  "hex",
+);
+
+function patchV932(wasm) {
+  const bodyStart = V932.sizeAt + 2;
+  // 那一段在函数体里找，只许出现一次；没有或不止一处都不改。
+  const 找 = (pat, len) => {
+    const body = wasm.subarray(bodyStart, bodyStart + len);
+    const i = body.indexOf(pat);
+    if (i < 0 || body.indexOf(pat, i + 1) >= 0) return -1;
+    return bodyStart + i;
+  };
+  if (wasm.length === V932.patchedLen && 找(V932_NEW, V932.newBodyLen) >= 0) return wasm;
+  const at = 找(V932_OLD, V932.oldBodyLen);
+  if (readUleb(wasm, V932.sizeAt).value !== V932.oldBodyLen || readUleb(wasm, V932.sizeAt).len !== 2) {
+    throw new Error("v9.3.2+4：函数体长度对不上，不去改");
+  }
+  // 局部变量声明：一组、3 个 i32。加一个给函数指针用（编号 5：参数 0、1，原有局部 2、3、4）。
+  if (!same(wasm, bodyStart, Buffer.from([0x01, 0x03, 0x7f]))) throw new Error("v9.3.2+4：局部变量声明对不上，不去改");
+  if (at < 0) throw new Error("v9.3.2+4：call_indirect 周围的字节对不上，不去改");
+
+  let o = 8;
+  while (o < wasm.length) {
+    const id = wasm[o++];
+    const size = readUleb(wasm, o);
+    o = size.start + size.len;
+    const payload = o;
+    if (id !== 10) {
+      o = payload + size.value;
+      continue;
+    }
+    const extra = V932.newBodyLen - V932.oldBodyLen;
+    const grown = encodeUleb(size.value + extra);
+    if (grown.length !== size.len) throw new Error("代码段长度的编码变长了，补丁停在这里");
+    const body = Buffer.concat([
+      Buffer.from([0x01, 0x04, 0x7f]),
+      wasm.subarray(bodyStart + 3, at),
+      V932_NEW,
+      wasm.subarray(at + V932_OLD.length, bodyStart + V932.oldBodyLen),
+    ]);
+    if (body.length !== V932.newBodyLen) throw new Error(`补完的函数体是 ${body.length} 字节`);
+    const sizeBytes = encodeUleb(V932.newBodyLen);
+    if (sizeBytes.length !== 2) throw new Error("函数体长度的编码变长了");
+    return Buffer.concat([
+      wasm.subarray(0, size.start),
+      grown,
+      wasm.subarray(payload, V932.sizeAt),
+      sizeBytes,
+      body,
+      wasm.subarray(bodyStart + V932.oldBodyLen),
+    ]);
+  }
+  throw new Error("没有找到代码段");
+}
+
 /**
+ * 认得两份构建：CryptPad v9.3.0+0 与 v9.3.2+4，按解开后的长度分辨。别的构建一律不改、直接报错。
  * @param {Buffer} wasm 解开后的 wasm
  * @returns {Buffer}
  */
 export function patchX2tNullCallback(wasm) {
+  if (wasm.length === V932.upstreamLen || wasm.length === V932.patchedLen) return patchV932(wasm);
   if (wasm.length === PATCHED_LEN && same(wasm, CALL_AT, CHECK)) {
     return wasm;
   }
   if (wasm.length !== UPSTREAM_LEN) {
-    throw new Error(`解开后是 ${wasm.length} 字节，这份补丁只认 ${UPSTREAM_LEN} 字节的 CryptPad v9.3.0+0`);
+    throw new Error(
+      `解开后是 ${wasm.length} 字节，这份补丁只认 CryptPad v9.3.0+0（${UPSTREAM_LEN}）与 v9.3.2+4（${V932.upstreamLen}）`,
+    );
   }
   if (wasm[BODY_SIZE_AT] !== 0xb8 || wasm[BODY_SIZE_AT + 1] !== 0x01) {
     throw new Error("函数体长度对不上，不去改");

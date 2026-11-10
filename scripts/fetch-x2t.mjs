@@ -18,7 +18,8 @@
  * 上游那份 9.67 MB，我们这份 6.8 MB，**小 30% 而功能一样**：
  * 上游那趟编译带着 26.5 MB 调试信息、而且没开优化（函数个数 146064 对 76562）。
  *
- * ⚠ **它基于的 core 是 9.3.0.140，而我们的文档服务是 9.4.0.129，差一档。**
+ * ⚠ **它基于的 core 是 Euro-Office 9.3.2（v9.3.2+4 起；v9.3.0+0 是 ONLYOFFICE 9.3.0.140），
+ * 而我们的文档服务是 ONLYOFFICE 9.4.0.129，差一档。**
  * 等本机有了 docker，`build/x2t/` 那份配方会编一份对齐 9.4.0.129 的顶掉它。
  *
  * ── 判据 ────────────────────────────────────────────────────────────────────
@@ -167,7 +168,7 @@ async function main() {
     校验和sha512: X2T.sha512,
     基于的core版本: X2T.builtFromCore,
     取的时间: new Date().toISOString(),
-    补丁: "null-image-callback：scripts/patch-x2t-null-callback.mjs，函数 62523 的空 call_indirect 改成跳过",
+    补丁: "null-image-callback：scripts/patch-x2t-null-callback.mjs，那个序列化函数里函数指针为空的 call_indirect 改成跳过（v9.3.0+0 是函数 62523，v9.3.2+4 是函数 86409）",
     产物: {
       "x2t.wasm": { ...shape, 说明: "存的是补过空回调之后再 brotli 压缩的那一份，组件自己解" },
       "x2t.js": { 字节: files.get("x2t.js").length },

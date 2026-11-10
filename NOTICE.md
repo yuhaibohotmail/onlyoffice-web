@@ -67,6 +67,14 @@ Non-code content (illustrations, icon sets, documentation) is licensed under **C
 | **The warm-up frame is hidden with an inline style** | Upstream hid this iframe only with the Tailwind class names `w-0 h-0 hidden absolute -z-10`, which work only when the host page happens to load Tailwind. The embed page has no Tailwind, so the frame was shown at the browser's default 300×150 size inside the page's flex layout and pushed the editor up, leaving a blank strip below it (measured: 154 pixels). It is now hidden with an inline `display: none` (the class names are kept). A hidden iframe still loads its page, so the warm-up is unaffected. |
 | **The "ONLYOFFICE · 修改版 · 许可" entry moved to the top right** | The entry used to sit in the editor's bottom-right corner, right on top of the status-bar buttons for zoom and fit-to-width (in the document, spreadsheet and presentation editors alike). It now sits at the right end of the topmost title row, in the empty space between the file name and the avatar. It is just as easy to see, its font size and wording are unchanged, and it no longer covers any button. |
 
+### 2026-11-10
+
+| What was changed | Why |
+|---|---|
+| **The conversion engine moves to CryptPad's v9.3.2+4** | The previous build (v9.3.0+0, from ONLYOFFICE core 9.3.0.140) could not open odp. v9.3.2+4 can, and also fixes links in exported PDFs. From v9.3.2 on, CryptPad builds from the **Euro-Office** core (Euro-Office is a fork of ONLYOFFICE, also released under the AGPL); see section 3 below. |
+| **The null image callback patch now recognises two builds** | v9.3.2+4 emulates function pointer casts, so every indirect call carries 16 i64 arguments and the old bytes do not exist in the new build. In the same function (function 86409 in v9.3.2+4) the patch now loads the function pointer first and only pushes the arguments and calls when it is not 0; the old build is patched as before. Both are recognised by their decompressed length, and nothing is changed if the surrounding bytes do not match. |
+| **New version query on the conversion engine URLs** | The engine is served with a long-lived cache; with a new engine at the same address, browsers would keep the old files, or replace only one of the pair so that they no longer match. In `src/const/index.ts` the query on `x2t.js` and `x2t.wasm` both become `v=20261110`. |
+
 ## 3. Where the corresponding source code is
 
 **The complete source code of this project is at <https://github.com/yuhaibohotmail/onlyoffice-web>**,
@@ -80,6 +88,9 @@ Release packages are only built from a clean tree sitting exactly on that tag (`
 Within it, the **format conversion engine** (the WebAssembly module in the browser) comes from
 CryptPad's `onlyoffice-x2t-wasm` (<https://github.com/cryptpad/onlyoffice-x2t-wasm>) —
 a public recipe that compiles ONLYOFFICE core to WebAssembly with emscripten, also released under the AGPL.
+The v9.3.2+4 build in use compiles the **Euro-Office** core (<https://github.com/Euro-Office/core>),
+which is itself based on the original ONLYOFFICE work (<https://github.com/ONLYOFFICE/core>);
+see CryptPad's `ATTRIBUTION` file in that repository.
 We use its released artifacts, verify them against the official checksums, then apply the null-callback patch in `scripts/patch-x2t-null-callback.mjs` (see `scripts/fetch-x2t.mjs`).
 How to build it yourself from source is described in `build/x2t/README.md`.
 

@@ -67,6 +67,14 @@ ONLYOFFICE 按 GNU Affero 通用公共许可证第 3 版发布，并附有 Ascen
 | **预热 iframe 改用行内样式藏起来** | 上游只靠 Tailwind 的类名 `w-0 h-0 hidden absolute -z-10` 把这个 iframe 藏起来，只有宿主页面恰好加载了 Tailwind 才有效。嵌入页没有 Tailwind，这个 iframe 就按浏览器默认的 300×150 显示在页面的弹性布局里，把编辑器往上挤，编辑器下面留出一截空白（实测 154 像素）。现在用行内的 `display: none` 藏起来（类名保留）。藏起来的 iframe 照样加载页面，预热不受影响。 |
 | **「ONLYOFFICE · 修改版 · 许可」入口挪到右上角** | 这个入口原来压在编辑器右下角，正好盖住状态栏上的缩放、适合页宽这些按钮（文字、表格、演示三种编辑器都是）。现在挪到最上面标题行的右边、文件名与头像之间那段空白里，照样一眼看得到，字号和那行字都没变，也不盖住任何按钮。 |
 
+### 2026-11-10
+
+| 改了什么 | 为什么 |
+|---|---|
+| **格式转换引擎换成 CryptPad 的 v9.3.2+4** | 原来那份（v9.3.0+0，基于 ONLYOFFICE core 9.3.0.140）打不开 odp。v9.3.2+4 打得开，另修了导出 PDF 后链接失效。从 v9.3.2 起 CryptPad 改从 **Euro-Office** 的 core 编（Euro-Office 是从 ONLYOFFICE 分出去的一支，同样按 AGPL 发布），见下面第三节。 |
+| **空图片回调的补丁改成认两份构建** | v9.3.2+4 开了函数指针强转的模拟，间接调用一律带 16 个 i64 参数，原来那几个字节在新构建里不存在。同一个函数（v9.3.2+4 里是函数 86409）改成先把要调的函数指针取出来，不是 0 才压参数、才调用；旧构建照旧那样补。两份都按解开后的长度认，周围字节对不上就不改。 |
+| **取转换引擎的地址换了版本参数** | 发转换引擎的地址是长期缓存的，换了引擎而地址不变，浏览器会接着用缓存里的旧文件，甚至只换掉其中一个、新旧对不上。`src/const/index.ts` 里 `x2t.js`、`x2t.wasm` 的查询参数一起改成 `v=20261110`。 |
+
 ## 三、对应源码在哪
 
 **本项目的完整源码在 <https://github.com/yuhaibohotmail/onlyoffice-web>**，
@@ -80,6 +88,9 @@ ONLYOFFICE 按 GNU Affero 通用公共许可证第 3 版发布，并附有 Ascen
 其中**格式转换引擎**（浏览器里那个 WebAssembly 模块）来自
 CryptPad 的 `onlyoffice-x2t-wasm`（<https://github.com/cryptpad/onlyoffice-x2t-wasm>）——
 一份公开的、把 ONLYOFFICE core 用 emscripten 编成 WebAssembly 的配方，同样按 AGPL 发布。
+现在用的 v9.3.2+4 编的是 **Euro-Office** 的 core（<https://github.com/Euro-Office/core>），
+Euro-Office 本身基于 ONLYOFFICE 的原作（<https://github.com/ONLYOFFICE/core>）；
+CryptPad 的说明见它仓库里的 `ATTRIBUTION`。
 我们取的是它发布的产物，核对官方校验和，再打上 `scripts/patch-x2t-null-callback.mjs` 里的空回调补丁（见 `scripts/fetch-x2t.mjs`）。
 自己从源码构建的做法写在 `build/x2t/README.zh.md` 里。
 
