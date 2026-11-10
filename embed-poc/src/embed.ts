@@ -26,6 +26,7 @@ import {
   editorManagerFactory,
   registerLegalNotice,
 } from "../../src";
+import { 分段取件 } from "./fetch-document";
 import { 按本页位置登记静态资源, 本页挂载前缀 } from "./mount-prefix";
 import {
   PROTOCOL,
@@ -276,6 +277,12 @@ async function 读答复(r: Response) {
 }
 
 const 组件认的类型: Record<string, EmbedFileType> = { docx: "DOCX", xlsx: "XLSX", pptx: "PPTX" };
+/** 拼好的文件按会话里的格式定类型，不看答复头（接入后端可能回 application/octet-stream）。 */
+const 文件类型: Record<EmbedFileType, string> = {
+  DOCX: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  XLSX: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  PPTX: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
 
 /** 组件只认 zh / en。令牌里写的是 `zh-CN`、`en-US` 这类时取前两个字母。 */
 function 界面语言(...候选: unknown[]): "zh" | "en" {
@@ -322,14 +329,20 @@ async function 打开(cmd: OpenCommand) {
         typeof j.document?.title === "string" && j.document.title ? j.document.title : "document." + 类型.toLowerCase(),
     };
 
+    // 分段取、断了只重取那一段（为什么见 fetch-document.ts）。接入后端不支持分段时回整份，照旧能用。
     说("正在取件…");
-    const d = await fetch(连接端 + "/api/document", { headers: { authorization: "Bearer " + 会话 } });
-    if (!d.ok) {
-      const a = await 读答复(d);
+    const 取 = await 分段取件(连接端 + "/api/document", { authorization: "Bearer " + 会话 }, {
+      类型: 文件类型[类型],
+      进度: (已收到, 总长) => {
+        if (总长 && 总长 > 4 * 1024 * 1024) 说(`正在取件… ${Math.floor((已收到 / 总长) * 100)}%`);
+      },
+    });
+    if (取.结果 === "拒") {
+      const a = await 读答复(取.response);
       return 失败("download", "取件失败 HTTP " + a.status, { status: a.status, body: a.文本.slice(0, 500), from: a.from });
     }
-    const blob = await d.blob();
-    const file = new File([blob], 会话信息.fileName, { type: blob.type });
+    if (取.结果 === "断") return 失败("download", 取.message);
+    const file = new File([取.blob], 会话信息.fileName, { type: 文件类型[类型] });
 
     说("正在打开…（第一次要下不少东西）");
     editorManagerFactory.destroy(ONLYOFFICE_ID);

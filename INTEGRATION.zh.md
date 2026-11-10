@@ -117,6 +117,14 @@
 带 `Authorization: Bearer <session>`。答复 `200`，内容是文件字节，带 `content-type`。
 接入后端去取 `document.url`（5.1 节），把字节流式转过来。
 
+**分段取（可选，0.3.3 起）。** 接入页分段取文件：第一个请求带 `Range: bytes=0-8388607`，
+其余的四段同时取，哪一段断了只重取那一段（重试三次）。支持分段的接入后端每段答 `206`，
+带 `Content-Range: bytes <起>-<止>/<总长>`；可以把 `Range` 转给 `document.url`，也可以自己切。
+不支持的接入后端不理 `Range`、照旧答 `200` 整份就行——接入页看到第一个请求回的是 `200`，
+就照原来那样用。为什么：有的浏览器插件会把几十 MB 的单个响应在半路掐断（`200` 之后
+`net::ERR_FAILED`，接入页拿到 `TypeError: Failed to fetch`），网络不稳时一断也得从头再来。
+拼好的文件类型按 `document.fileType` 定，不看答复的 `content-type`。
+
 ### `POST /api/save`
 
 带 `Authorization: Bearer <session>` 与 `content-type: application/octet-stream`，请求体就是文件。
@@ -164,8 +172,8 @@
 | `/api/document` | `failed{stage:"download", status, body, from, unsavedKept:false}` |
 | `/api/save` | `failed{stage:"save", status, body, from, unsavedKept:true}`：那一份字节留在接入页里 |
 
-**跨源。** 接入后端与接入页同源时用不着。不同源时，它要为接入页那一个源答 `Authorization` 与
-`content-type` 的预检，并暴露 `x-oow-from` 与 `x-oow-host-status` 两个头。
+**跨源。** 接入后端与接入页同源时用不着。不同源时，它要为接入页那一个源答 `Authorization`、
+`content-type` 与 `Range` 的预检，并暴露 `x-oow-from`、`x-oow-host-status` 与 `Content-Range` 三个头。
 
 ## 5. 接入后端 ↔ 宿主
 

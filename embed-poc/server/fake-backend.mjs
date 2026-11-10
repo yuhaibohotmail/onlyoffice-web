@@ -102,13 +102,13 @@ const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED.includes(origin)) {
     res.setHeader("access-control-allow-origin", origin);
-    res.setHeader("access-control-expose-headers", "x-oow-from, x-oow-host-status");
+    res.setHeader("access-control-expose-headers", "x-oow-from, x-oow-host-status, content-range");
     res.setHeader("vary", "origin");
   }
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "access-control-allow-methods": "GET, POST, OPTIONS",
-      "access-control-allow-headers": "authorization, content-type",
+      "access-control-allow-headers": "authorization, content-type, range",
       "access-control-max-age": "600",
     });
     return res.end();
@@ -182,9 +182,32 @@ const server = http.createServer(async (req, res) => {
     }
     if (!r.ok) return relay(res, r.status, await r.text().catch(() => ""));
     const bytes = Buffer.from(await r.arrayBuffer());
+    const type = r.headers.get("content-type") || "application/octet-stream";
+    // Range is optional (INTEGRATION.md 4). This backend answers a single range from the
+    // bytes it already holds; the embed page fetches large files in pieces this way.
+    const m = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || "");
+    if (m) {
+      const start = Number(m[1]);
+      const end = Math.min(m[2] === "" ? bytes.length - 1 : Number(m[2]), bytes.length - 1);
+      if (start >= bytes.length) {
+        res.writeHead(416, { "content-range": "bytes */" + bytes.length, "cache-control": "no-store" });
+        return res.end();
+      }
+      if (end >= start) {
+        res.writeHead(206, {
+          "content-type": type,
+          "content-length": end - start + 1,
+          "content-range": `bytes ${start}-${end}/${bytes.length}`,
+          "accept-ranges": "bytes",
+          "cache-control": "no-store",
+        });
+        return res.end(bytes.subarray(start, end + 1));
+      }
+    }
     res.writeHead(200, {
-      "content-type": r.headers.get("content-type") || "application/octet-stream",
+      "content-type": type,
       "content-length": bytes.length,
+      "accept-ranges": "bytes",
       "cache-control": "no-store",
     });
     return res.end(bytes);

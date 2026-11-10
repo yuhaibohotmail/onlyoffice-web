@@ -124,6 +124,17 @@ Answer `200`:
 Header `Authorization: Bearer <session>`. Answer `200` with the file's bytes and a `content-type`.
 The backend fetches `document.url` (section 5.1) and streams the bytes through.
 
+**Ranges (optional, since 0.3.3).** The embed page asks for the file in pieces: the first request carries
+`Range: bytes=0-8388607`, the rest follow four at a time, and a piece that breaks off is retried
+(three times) on its own. A backend that supports this answers each piece with `206` and
+`Content-Range: bytes <start>-<end>/<total>`; it may pass the `Range` header on to `document.url`
+or cut the piece itself. A backend that does not simply ignores `Range` and answers `200` with the
+whole file — the page sees the `200` on the first request and uses it as before. Why: some
+browser extensions cut a single response of tens of megabytes off partway (`200` followed by
+`net::ERR_FAILED`; the page sees `TypeError: Failed to fetch`), and on a shaky network one break
+otherwise means starting over. The assembled file's type comes from `document.fileType`, not
+from the answer's `content-type`.
+
 ### `POST /api/save`
 
 Headers `Authorization: Bearer <session>`, `content-type: application/octet-stream`; body = the file.
@@ -174,8 +185,8 @@ What the page does with a failure:
 | `/api/save` | `failed{stage:"save", status, body, from, unsavedKept:true}`: the bytes stay in the page |
 
 **CORS.** Not needed when the backend shares the embed page's origin. If it does not, it must answer the
-preflight for `Authorization` and `content-type` and expose `x-oow-from` and `x-oow-host-status`, for the
-embed page's origin only.
+preflight for `Authorization`, `content-type` and `Range` and expose `x-oow-from`, `x-oow-host-status`
+and `Content-Range`, for the embed page's origin only.
 
 ## 5. Backend ↔ host
 
