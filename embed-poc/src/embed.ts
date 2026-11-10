@@ -284,6 +284,14 @@ const 文件类型: Record<EmbedFileType, string> = {
   PPTX: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
+/** open 里的 fetchChunkBytes：不给或不是数＝8 MB；0 ＝不分段；其余不小于 1 MB。 */
+function 段大小(v: unknown): number {
+  const MB = 1024 * 1024;
+  if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return 8 * MB;
+  if (v === 0) return 0;
+  return Math.max(MB, Math.floor(v));
+}
+
 /** 组件只认 zh / en。令牌里写的是 `zh-CN`、`en-US` 这类时取前两个字母。 */
 function 界面语言(...候选: unknown[]): "zh" | "en" {
   for (const c of 候选) {
@@ -332,6 +340,7 @@ async function 打开(cmd: OpenCommand) {
     // 分段取、断了只重取那一段（为什么见 fetch-document.ts）。接入后端不支持分段时回整份，照旧能用。
     说("正在取件…");
     const 取 = await 分段取件(连接端 + "/api/document", { authorization: "Bearer " + 会话 }, {
+      段大小: 段大小(cmd.fetchChunkBytes),
       类型: 文件类型[类型],
       进度: (已收到, 总长) => {
         if (总长 && 总长 > 4 * 1024 * 1024) 说(`正在取件… ${Math.floor((已收到 / 总长) * 100)}%`);

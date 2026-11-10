@@ -22,7 +22,7 @@ export type 取件结果 =
   | { 结果: "断"; message: string };
 
 export interface 取件选项 {
-  /** 每段多少字节。默认 8 MB。 */
+  /** 每段多少字节。默认 8 MB；0 = 不分段，整份一次取（不带 Range）。 */
   段大小?: number;
   /** 同时取几段。默认 4。 */
   并发?: number;
@@ -56,6 +56,20 @@ export async function 分段取件(地址: string, 头: Record<string, string>, 
   const 间隔 = 选项.重试间隔 ?? 1000;
   const f = 选项.fetch ?? fetch;
   const 等 = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  if (段大小 <= 0) {
+    // 不分段：和 0.3.3 以前一样整份取一次，不重试（整份重来代价太大，交给用户刷新）。
+    try {
+      const r = await f(地址, { headers: 头, cache: "no-store" });
+      if (!r.ok) return { 结果: "拒", response: r };
+      const blob = await r.blob();
+      const 类型 = 选项.类型 || r.headers.get("content-type") || "application/octet-stream";
+      选项.进度?.(blob.size, blob.size);
+      return { 结果: "好", blob: 选项.类型 ? new Blob([blob], { type: 类型 }) : blob };
+    } catch (e) {
+      return { 结果: "断", message: "取件中断（没分段）：" + String(e) };
+    }
+  }
 
   let 已收到 = 0;
   let 总长: number | null = null;

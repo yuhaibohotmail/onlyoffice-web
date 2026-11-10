@@ -126,7 +126,8 @@ The backend fetches `document.url` (section 5.1) and streams the bytes through.
 
 **Ranges (optional, since 0.3.3).** The embed page asks for the file in pieces: the first request carries
 `Range: bytes=0-8388607`, the rest follow four at a time, and a piece that breaks off is retried
-(three times) on its own. A backend that supports this answers each piece with `206` and
+(three times) on its own. The host sets the piece size with `fetchChunkBytes` in `open` (since 0.3.4;
+8 MB when left out, at least 1 MB, `0` for no pieces at all). A backend that supports this answers each piece with `206` and
 `Content-Range: bytes <start>-<end>/<total>`; it may pass the `Range` header on to `document.url`
 or cut the piece itself. A backend that does not simply ignores `Range` and answers `200` with the
 whole file — the page sees the `200` on the first request and uses it as before. Why: some

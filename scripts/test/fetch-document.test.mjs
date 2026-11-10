@@ -111,3 +111,20 @@ test("Content-Range 解析", () => {
   assert.equal(读ContentRange("bytes 0-100/100"), null);
   assert.equal(读ContentRange(null), null);
 });
+
+test("段大小 0：不分段，整份一次取，不带 Range", async () => {
+  const { f, 记录 } = 后端();
+  const r = await 分段取件("/api/document", {}, { ...快, 段大小: 0, fetch: f, 类型: "application/x-given" });
+  assert.equal(r.结果, "好");
+  assert.deepEqual(await 拿字节(r), 文件);
+  assert.equal(r.blob.type, "application/x-given");
+  assert.deepEqual(记录, [undefined]);
+});
+
+test("大段：段比文件还大时一次取完", async () => {
+  const { f, 记录 } = 后端();
+  const r = await 分段取件("/api/document", {}, { ...快, 段大小: 20 * 1024 * 1024, fetch: f });
+  assert.equal(r.结果, "好");
+  assert.deepEqual(await 拿字节(r), 文件);
+  assert.equal(记录.length, 1);
+});
